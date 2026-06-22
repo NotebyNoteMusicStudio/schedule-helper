@@ -2335,7 +2335,7 @@ async function logout() {
       'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1c3BpcnFpcWJybWZua3Ryc2ppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMTU3NzUsImV4cCI6MjA5NzY5MTc3NX0.k9WiBNwBSKjn1pMlwmYtvJNfGN_q1YeorI2tOnJuB3o'
     }
   }).catch(() => {});
-  window.location.href = '/';
+  window.location.href = '/?signout=true';
 }
 
 // ── Team ──────────────────────────────────────────────────────────────────────
