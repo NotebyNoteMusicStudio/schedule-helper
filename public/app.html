@@ -2326,16 +2326,11 @@ function soloExportSchedule() {
 
 // ── Logout ───────────────────────────────────────────────────────────────────
 async function logout() {
-  const token = localStorage.getItem('sh_token') || '';
+  Object.keys(localStorage).forEach(key => {
+    if (key.startsWith('sb-')) localStorage.removeItem(key);
+  });
   localStorage.removeItem('sh_token');
-  await fetch('https://kuspirqiqbrmfnktrsji.supabase.co/auth/v1/logout', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1c3BpcnFpcWJybWZua3Ryc2ppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMTU3NzUsImV4cCI6MjA5NzY5MTc3NX0.k9WiBNwBSKjn1pMlwmYtvJNfGN_q1YeorI2tOnJuB3o'
-    }
-  }).catch(() => {});
-  window.location.href = '/?signout=true';
+  window.location.replace('/');
 }
 
 // ── Team ──────────────────────────────────────────────────────────────────────
