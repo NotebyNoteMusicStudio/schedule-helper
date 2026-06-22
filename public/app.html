@@ -416,6 +416,7 @@ body {
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="showView('placement')">+ Schedule</button>
         <button class="btn btn-primary btn-sm" onclick="openAddTeacher()">+ Add Provider</button>
+        <button class="btn btn-danger-ghost btn-sm" onclick="openResetModal()">↺ Reset</button>
       </div>
     </div>
 
@@ -835,6 +836,45 @@ body {
   </div>
 </div>
 
+<div id="modal-reset" class="modal-bg hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-title" style="color:#991b1b">Reset Schedule</div>
+    <p style="font-size:14px;color:var(--muted);margin-bottom:1.25rem;line-height:1.6">Choose what to clear. Useful at the start of a new semester or season.</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1.5rem">
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+        <input type="checkbox" id="reset_clients" style="margin-top:2px;accent-color:var(--navy)" />
+        <div><div style="font-size:14px;font-weight:500;color:var(--navy)">Clear all client assignments</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Removes every client from every provider's route. Keeps providers and their availability.</div></div>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+        <input type="checkbox" id="reset_avail" style="margin-top:2px;accent-color:var(--navy)" />
+        <div><div style="font-size:14px;font-weight:500;color:var(--navy)">Clear provider availability</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Resets all availability windows so providers can re-submit for the new semester.</div></div>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+        <input type="checkbox" id="reset_providers" style="margin-top:2px;accent-color:var(--navy)" />
+        <div><div style="font-size:14px;font-weight:500;color:var(--navy)">Remove all providers</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Wipes the entire provider list. Start completely fresh.</div></div>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+        <input type="checkbox" id="reset_log" style="margin-top:2px;accent-color:var(--navy)" />
+        <div><div style="font-size:14px;font-weight:500;color:var(--navy)">Clear request log</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Wipes the admin request log history.</div></div>
+      </label>
+    </div>
+    <div style="background:rgba(153,27,27,0.06);border:1px solid rgba(153,27,27,0.15);border-radius:8px;padding:10px 14px;font-size:12px;color:#991b1b;margin-bottom:1.25rem">
+      ⚠ This cannot be undone. Consider exporting your schedule first.
+    </div>
+    <div style="display:flex;gap:8px;justify-content:space-between;align-items:center">
+      <button class="btn btn-ghost btn-sm" onclick="exportBeforeReset()" style="font-size:12px">↓ Export first</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeModal('modal-reset')">Cancel</button>
+        <button class="btn" style="background:#991b1b;color:#fff;padding:8px 18px;font-size:13.5px" onclick="confirmReset()">Reset selected</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════════════════════════ TEACHER VIEW ═══════════════════════════════ -->
 <div id="teacherShell" class="hidden">
   <div style="background:var(--navy);padding:14px 2rem;display:flex;align-items:center;justify-content:space-between">
@@ -952,7 +992,14 @@ body {
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+// ── Supabase client ────────────────────────────────────────────────────────────
+const SB_URL = 'https://kuspirqiqbrmfnktrsji.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1c3BpcnFpcWJybWZua3Ryc2ppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMTU3NzUsImV4cCI6MjA5NzY5MTc3NX0.k9WiBNwBSKjn1pMlwmYtvJNfGN_q1YeorI2tOnJuB3o';
+const sb = window.supabase.createClient(SB_URL, SB_KEY);
+let currentUser = null;
+
 // ── State ──────────────────────────────────────────────────────────────────────
 const AVATAR_COLORS = [
   {bg:'#E1F5EE',tx:'#085041'},{bg:'#E6F1FB',tx:'#0C447C'},{bg:'#EEEDFE',tx:'#3C3489'},
@@ -961,52 +1008,8 @@ const AVATAR_COLORS = [
 ];
 
 let db = {
-  teachers: [
-    {
-      id:'t1', first:'Sarah', last:'Miller', phone:'(423) 555-0111', city:'Hixson, TN',
-      instruments:'House cleaning', specialty:'Deep clean, move-in/out', notes:'Great with pets', color:0,
-      availability:[
-        {day:'Monday',from:'15:00',to:'18:00'},
-        {day:'Wednesday',from:'15:00',to:'18:00'},
-        {day:'Friday',from:'14:00',to:'17:00'}
-      ],
-      students:[
-        {day:'Mon',time:'15:00',address:'2340 Hamill Rd, Hixson, TN 37343',name:'Emma W.'},
-        {day:'Mon',time:'15:30',address:'2501 Hamill Rd, Hixson, TN 37343',name:'Jake T.'},
-        {day:'Wed',time:'16:00',address:'5100 Highway 153, Hixson, TN 37343',name:'Lily S.'},
-        {day:'Fri',time:'15:00',address:'3200 Dayton Blvd, Chattanooga, TN 37415',name:'Noah B.'},
-      ]
-    },
-    {
-      id:'t2', first:'James', last:'Torres', phone:'(423) 555-0122', city:'Soddy-Daisy, TN',
-      instruments:'Pet sitting', specialty:'Dogs, cats', notes:'Certified trainer', color:1,
-      availability:[
-        {day:'Tuesday',from:'14:00',to:'18:00'},
-        {day:'Thursday',from:'14:00',to:'18:00'},
-        {day:'Saturday',from:'10:00',to:'14:00'}
-      ],
-      students:[
-        {day:'Tue',time:'15:00',address:'9410 Dayton Pike, Soddy-Daisy, TN 37379',name:'Ryan M.'},
-        {day:'Thu',time:'15:00',address:'9850 Dayton Pike, Soddy-Daisy, TN 37379',name:'Ava K.'},
-        {day:'Thu',time:'15:30',address:'9200 Dayton Pike, Soddy-Daisy, TN 37379',name:'Ethan P.'},
-        {day:'Sat',time:'10:00',address:'400 School St, Soddy-Daisy, TN 37379',name:'Mia R.'},
-      ]
-    },
-    {
-      id:'t3', first:'Carla', last:'Nguyen', phone:'(706) 555-0133', city:'Ringgold, GA',
-      instruments:'Tutoring', specialty:'Math, science', notes:'Patient with kids', color:2,
-      availability:[
-        {day:'Monday',from:'16:00',to:'19:00'},
-        {day:'Wednesday',from:'16:00',to:'19:00'},
-        {day:'Saturday',from:'09:00',to:'13:00'}
-      ],
-      students:[
-        {day:'Mon',time:'16:00',address:'143 Alabama Hwy, Ringgold, GA 30736',name:'Sophie L.'},
-        {day:'Wed',time:'16:30',address:'340 Cummings Hwy, Ringgold, GA 30736',name:'Jack C.'},
-      ]
-    }
-  ],
-  nextId: 4,
+  teachers: [],
+  nextId: 1,
   selectedTeacherId: null
 };
 
@@ -1153,8 +1156,9 @@ function openTeacherDetail(id) {
   document.getElementById('modal-teacherDetail').classList.remove('hidden');
 }
 
-function deleteTeacher() {
+async function deleteTeacher() {
   if (!confirm('Remove this provider?')) return;
+  await dbDeleteProvider(db.selectedTeacherId);
   db.teachers = db.teachers.filter(t=>t.id!==db.selectedTeacherId);
   closeModal('modal-teacherDetail');
   renderTeacherList();
@@ -1167,19 +1171,25 @@ function openAddTeacher() {
   document.getElementById('modal-addTeacher').classList.remove('hidden');
 }
 
-function saveNewTeacher() {
+async function saveNewTeacher() {
   const first = document.getElementById('at_first').value.trim();
   const last = document.getElementById('at_last').value.trim();
   if (!first) return alert('Please enter a first name.');
-  db.teachers.push({
-    id:'t'+db.nextId++,
-    first, last,
+  const color = db.teachers.length % AVATAR_COLORS.length;
+  const saved = await dbSaveProvider({ first, last,
     phone: document.getElementById('at_phone').value,
     city: document.getElementById('at_city').value,
     instruments: document.getElementById('at_instruments').value,
     specialty: document.getElementById('at_specialty').value,
     notes: document.getElementById('at_notes').value,
-    color: db.teachers.length % AVATAR_COLORS.length,
+    color
+  });
+  if (!saved) return alert('Error saving provider. Please try again.');
+  db.teachers.push({
+    id: saved.id, first, last,
+    phone: saved.phone, city: saved.city,
+    instruments: saved.instruments, specialty: saved.specialty,
+    notes: saved.notes, color,
     availability: [], students: []
   });
   closeModal('modal-addTeacher');
@@ -1315,8 +1325,11 @@ function selectSlot(el, teacherId, slot, addr, name) {
     if (ampm==='PM'&&h!==12) h+=12;
     if (ampm==='AM'&&h===12) h=0;
     const timeStr = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
-    t.students.push({day, time:timeStr, address:addr, name:name||'New Student'});
-    document.getElementById('placementResults').innerHTML = `<div style="background:rgba(45,122,95,0.1);border:1px solid rgba(45,122,95,0.3);border-radius:10px;padding:1.5rem;text-align:center;color:var(--success);font-size:14px">✓ Assigned! ${name||'Student'} added to ${fullName(t)}'s route on ${slot}.</div>`;
+    const apt = { day, time:timeStr, address:addr, name:name||'New Client' };
+    dbSaveAppointment(teacherId, apt).then(saved => { if(saved) apt._id = saved.id; });
+    t.students.push(apt);
+    logRequest({ clientName: name||'New Client', clientAddress: addr, providerName: fullName(t), slot, status:'placed' });
+    document.getElementById('placementResults').innerHTML = `<div style="background:rgba(45,122,95,0.1);border:1px solid rgba(45,122,95,0.3);border-radius:10px;padding:1.5rem;text-align:center;color:var(--success);font-size:14px">✓ Assigned! ${name||'client'} added to ${fullName(t)}'s route on ${slot}.</div>`;
     renderDashboard();
   }
 }
@@ -1494,7 +1507,16 @@ function previewTeacherView(id) {
 // ── Teacher View ──────────────────────────────────────────────────────────────
 let tv_teacher = null;
 
-function loadTeacherView(id) {
+async function loadTeacherView(id) {
+  // Try to load from Supabase if no local data
+  if (!getTeacher(id)) {
+    // Provider accessing their own link - load their data
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      currentUser = session.user;
+      await loadData();
+    }
+  }
   const t = getTeacher(id);
   if (!t) return;
   tv_teacher = t;
@@ -1557,9 +1579,46 @@ function tv_removeStudent(i) {
   renderTVStudents();
 }
 
-function tv_save() {
-  document.getElementById('tv_saved').classList.remove('hidden');
-  // In production this would POST to a backend
+async function tv_save() {
+  if (!tv_teacher) return;
+  const btn = document.querySelector('#teacherShell button.btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+  try {
+    const providerId = tv_teacher.id;
+
+    // Save availability - delete old, insert new
+    await sb.from('availability').delete().eq('provider_id', providerId);
+    for (const a of tv_teacher.availability) {
+      await sb.from('availability').insert({
+        user_id: tv_teacher._owner_id || currentUser?.id,
+        provider_id: providerId,
+        day: a.day,
+        from_time: a.from,
+        to_time: a.to
+      });
+    }
+
+    // Save students/appointments - delete old, insert new
+    await sb.from('appointments').delete().eq('provider_id', providerId);
+    for (const s of tv_teacher.students) {
+      await sb.from('appointments').insert({
+        user_id: tv_teacher._owner_id || currentUser?.id,
+        provider_id: providerId,
+        day: s.day,
+        time: s.time,
+        address: s.address || '',
+        name: s.name || ''
+      });
+    }
+
+    document.getElementById('tv_saved').classList.remove('hidden');
+  } catch(e) {
+    console.error('Save error:', e);
+    alert('Error saving. Please try again.');
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Save my schedule'; }
 }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────────
@@ -1796,6 +1855,8 @@ function applySettings() {
   if (document.getElementById('view-links').classList.contains('active')) renderLinks();
 
   updatePreview();
+  // Save settings to Supabase async
+  if (currentUser) saveSettings().catch(e => console.error('Settings save:', e));
 }
 
 function updatePreview() {
@@ -1982,7 +2043,9 @@ Location: ${location}`)) {
     const ap = parts[2];
     if (ap==='PM'&&h!==12) h+=12; if(ap==='AM'&&h===12) h=0;
     const timeStr = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
-    t.students.push({day, time:timeStr, address:location, name});
+    const apt2 = { day, time:timeStr, address:location, name };
+    dbSaveAppointment(teacherId, apt2).then(saved => { if(saved) apt2._id = saved.id; });
+    t.students.push(apt2);
     logRequest({ clientName: name, clientAddress: location, providerName: fullName(t), slot, status:'placed' });
     document.getElementById('placementResults2').innerHTML = `<div style="background:rgba(45,122,95,0.1);border:1px solid rgba(45,122,95,0.3);border-radius:10px;padding:1.5rem;text-align:center;color:var(--success);font-size:14px">✓ Assigned! ${name} booked with ${fullName(t)} on ${slot}.</div>`;
     renderDashboard();
@@ -2461,8 +2524,7 @@ let requestLog = [];
 let logFilter = 'all';
 
 function logRequest(entry) {
-  // Auto-called whenever a scheduling action happens
-  requestLog.unshift({
+  const record = {
     id: Date.now() + Math.random(),
     date: new Date().toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}),
     time: new Date().toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'}),
@@ -2470,9 +2532,12 @@ function logRequest(entry) {
     clientAddress: entry.clientAddress || '—',
     providerName: entry.providerName || '—',
     slot: entry.slot || '—',
-    status: entry.status || 'pending',  // pending | placed | declined | waitlist
+    status: entry.status || 'pending',
     notes: entry.notes || ''
-  });
+  };
+  requestLog.unshift(record);
+  // Save to Supabase async (fire and forget)
+  dbSaveLogEntry(record).catch(e => console.error('Log save error:', e));
 }
 
 function setLogFilter(filter, btn) {
@@ -2518,19 +2583,21 @@ function renderRequestLog() {
   `).join('');
 }
 
-function updateRequestStatus(id, status) {
+async function updateRequestStatus(id, status) {
   const r = requestLog.find(r => String(r.id) === String(id));
-  if (r) { r.status = status; renderRequestLog(); }
+  if (r) { r.status = status; await dbUpdateLogStatus(id, status); renderRequestLog(); }
 }
 
-function deleteRequest(id) {
+async function deleteRequest(id) {
+  await dbDeleteLogEntry(id);
   requestLog = requestLog.filter(r => String(r.id) !== String(id));
   renderRequestLog();
 }
 
-function clearRequestLog() {
+async function clearRequestLog() {
   if (!requestLog.length) return;
   if (!confirm('Clear entire request log?')) return;
+  await dbClearLog();
   requestLog = [];
   renderRequestLog();
 }
@@ -2577,14 +2644,332 @@ function exportRequestLog() {
   });
 })();
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-const params = new URLSearchParams(window.location.search);
-const teacherParam = params.get('teacher');
-if (teacherParam && getTeacher(teacherParam)) {
-  loadTeacherView(teacherParam);
-} else {
-  renderDashboard();
+
+
+// ── Reset ─────────────────────────────────────────────────────────────────────
+function openResetModal() {
+  ['reset_clients','reset_avail','reset_providers','reset_log'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = false;
+  });
+  document.getElementById('modal-reset').classList.remove('hidden');
 }
+
+async function confirmReset() {
+  const clearClients   = document.getElementById('reset_clients')?.checked;
+  const clearAvail     = document.getElementById('reset_avail')?.checked;
+  const clearProviders = document.getElementById('reset_providers')?.checked;
+  const clearLog       = document.getElementById('reset_log')?.checked;
+
+  if (!clearClients && !clearAvail && !clearProviders && !clearLog) {
+    alert('Please select at least one thing to reset.');
+    return;
+  }
+
+  const summary = [
+    clearClients   && 'all client assignments',
+    clearAvail     && 'provider availability',
+    clearProviders && 'all providers',
+    clearLog       && 'request log'
+  ].filter(Boolean).join(', ');
+
+  if (!confirm(`This will permanently clear: ${summary}.\n\nAre you sure?`)) return;
+
+  showLoading('Resetting...');
+
+  if (clearProviders) {
+    await dbResetProviders();
+    db.teachers = [];
+  } else {
+    if (clearClients) {
+      await dbResetClients();
+      db.teachers.forEach(t => { t.students = []; });
+    }
+    if (clearAvail) {
+      await dbResetAvailability();
+      db.teachers.forEach(t => { t.availability = []; });
+    }
+  }
+
+  if (clearLog) {
+    await dbClearLog();
+    requestLog = [];
+  }
+
+  hideLoading();
+  closeModal('modal-reset');
+  renderDashboard();
+
+  const msg = document.createElement('div');
+  msg.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1B3A5C;color:#F8F5F0;padding:12px 20px;border-radius:8px;font-size:13px;z-index:999;box-shadow:0 4px 20px rgba(0,0,0,0.2)';
+  msg.textContent = '✓ Reset complete';
+  document.body.appendChild(msg);
+  setTimeout(() => msg.remove(), 3000);
+}
+
+function exportBeforeReset() {
+  const allSlots = getAllSlots();
+  if (!allSlots.length) { alert('Nothing to export yet.'); return; }
+  let csv = 'Day,Time,Provider,Client,Address\n';
+  allSlots.forEach(s => {
+    csv += `"${s.day}","${fmtTime(s.time)}","${fullName(s.teacher)}","${s.name}","${s.address}"\n`;
+  });
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'schedule-backup-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}
+
+// ── Supabase Data Layer ───────────────────────────────────────────────────────
+
+async function loadData() {
+  if (!currentUser) return;
+  // Load providers with their availability and appointments
+  const { data: providers, error } = await sb
+    .from('providers')
+    .select('*, availability(*), appointments(*)')
+    .eq('user_id', currentUser.id)
+    .order('created_at');
+
+  if (error) { console.error('Load error:', error.message); return; }
+
+  db.teachers = (providers || []).map(p => ({
+    id: p.id,
+    first: p.first || '',
+    last: p.last || '',
+    phone: p.phone || '',
+    city: p.city || '',
+    instruments: p.instruments || '',
+    specialty: p.specialty || '',
+    notes: p.notes || '',
+    color: p.color || 0,
+    availability: (p.availability || []).map(a => ({
+      day: a.day, from: a.from_time, to: a.to_time, _id: a.id
+    })),
+    students: (p.appointments || []).map(s => ({
+      day: s.day, time: s.time, address: s.address || '', name: s.name || '', _id: s.id
+    }))
+  }));
+}
+
+async function loadSettings() {
+  if (!currentUser) return;
+  const { data } = await sb.from('user_settings').select('*').eq('user_id', currentUser.id).single();
+  if (data) {
+    cfg.bizName = data.biz_name || '';
+    cfg.tagline = data.tagline || '';
+    cfg.workerLabel = data.worker_label || 'Providers';
+    cfg.clientLabel = data.client_label || 'Clients';
+    cfg.apptLabel = data.appt_label || 'Appointments';
+    cfg.serviceFieldLabel = data.service_field_label || 'Service offered';
+    cfg.bizType = data.biz_type || 'mobile';
+    cfg.locationAddress = data.location_address || '';
+    cfg.apptDuration = data.appt_duration || 60;
+  }
+}
+
+async function saveSettings() {
+  if (!currentUser) return;
+  await sb.from('user_settings').upsert({
+    user_id: currentUser.id,
+    biz_name: cfg.bizName,
+    tagline: cfg.tagline,
+    worker_label: cfg.workerLabel,
+    client_label: cfg.clientLabel,
+    appt_label: cfg.apptLabel,
+    service_field_label: cfg.serviceFieldLabel,
+    biz_type: cfg.bizType,
+    location_address: cfg.locationAddress,
+    appt_duration: cfg.apptDuration
+  });
+}
+
+async function dbSaveProvider(teacher) {
+  if (!currentUser) return null;
+  const { data, error } = await sb.from('providers').insert({
+    user_id: currentUser.id,
+    first: teacher.first,
+    last: teacher.last,
+    phone: teacher.phone || '',
+    city: teacher.city || '',
+    instruments: teacher.instruments || '',
+    specialty: teacher.specialty || '',
+    notes: teacher.notes || '',
+    color: teacher.color || 0
+  }).select().single();
+  if (error) { console.error('Save provider error:', error.message); return null; }
+  return data;
+}
+
+async function dbDeleteProvider(providerId) {
+  if (!currentUser) return;
+  await sb.from('providers').delete().eq('id', providerId).eq('user_id', currentUser.id);
+}
+
+async function dbSaveAppointment(providerId, apt) {
+  if (!currentUser) return null;
+  const { data, error } = await sb.from('appointments').insert({
+    user_id: currentUser.id,
+    provider_id: providerId,
+    day: apt.day,
+    time: apt.time,
+    address: apt.address || '',
+    name: apt.name || ''
+  }).select().single();
+  if (error) { console.error('Save appointment error:', error.message); return null; }
+  return data;
+}
+
+async function dbDeleteAppointment(appointmentId) {
+  if (!currentUser) return;
+  await sb.from('appointments').delete().eq('id', appointmentId).eq('user_id', currentUser.id);
+}
+
+async function dbSaveAvailability(providerId, avail) {
+  if (!currentUser) return null;
+  const { data, error } = await sb.from('availability').insert({
+    user_id: currentUser.id,
+    provider_id: providerId,
+    day: avail.day,
+    from_time: avail.from,
+    to_time: avail.to
+  }).select().single();
+  if (error) { console.error('Save availability error:', error.message); return null; }
+  return data;
+}
+
+async function dbDeleteAvailability(availId) {
+  if (!currentUser) return;
+  await sb.from('availability').delete().eq('id', availId).eq('user_id', currentUser.id);
+}
+
+async function dbSaveLogEntry(entry) {
+  if (!currentUser) return;
+  await sb.from('request_log').insert({
+    user_id: currentUser.id,
+    log_date: entry.date || '',
+    log_time: entry.time || '',
+    client_name: entry.clientName || '',
+    client_address: entry.clientAddress || '',
+    provider_name: entry.providerName || '',
+    slot: entry.slot || '',
+    status: entry.status || 'pending',
+    notes: entry.notes || ''
+  });
+}
+
+async function dbLoadRequestLog() {
+  if (!currentUser) return [];
+  const { data } = await sb
+    .from('request_log')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .order('created_at', { ascending: false });
+  return (data || []).map(r => ({
+    id: r.id,
+    date: r.log_date,
+    time: r.log_time,
+    clientName: r.client_name,
+    clientAddress: r.client_address,
+    providerName: r.provider_name,
+    slot: r.slot,
+    status: r.status,
+    notes: r.notes
+  }));
+}
+
+async function dbUpdateLogStatus(id, status) {
+  if (!currentUser) return;
+  await sb.from('request_log').update({ status }).eq('id', id).eq('user_id', currentUser.id);
+}
+
+async function dbDeleteLogEntry(id) {
+  if (!currentUser) return;
+  await sb.from('request_log').delete().eq('id', id).eq('user_id', currentUser.id);
+}
+
+async function dbClearLog() {
+  if (!currentUser) return;
+  await sb.from('request_log').delete().eq('user_id', currentUser.id);
+}
+
+async function dbResetClients(teacherIds) {
+  if (!currentUser) return;
+  await sb.from('appointments').delete().eq('user_id', currentUser.id);
+}
+
+async function dbResetAvailability() {
+  if (!currentUser) return;
+  await sb.from('availability').delete().eq('user_id', currentUser.id);
+}
+
+async function dbResetProviders() {
+  if (!currentUser) return;
+  await sb.from('providers').delete().eq('user_id', currentUser.id);
+}
+
+// Show loading overlay
+function showLoading(msg) {
+  let el = document.getElementById('app-loading');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'app-loading';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(248,245,240,0.92);z-index:999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px';
+    el.innerHTML = '<div style="width:32px;height:32px;border:3px solid #9ED5C5;border-top-color:#1B3A5C;border-radius:50%;animation:spin 0.8s linear infinite"></div><div style="font-family:DM Sans,sans-serif;color:#1B3A5C;font-size:14px">' + (msg||'Loading...') + '</div>';
+    if (!document.getElementById('spin-style')) {
+      const s = document.createElement('style');
+      s.id = 'spin-style';
+      s.textContent = '@keyframes spin{to{transform:rotate(360deg)}}';
+      document.head.appendChild(s);
+    }
+    document.body.appendChild(el);
+  }
+  el.style.display = 'flex';
+}
+
+function hideLoading() {
+  const el = document.getElementById('app-loading');
+  if (el) el.style.display = 'none';
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async function initApp() {
+  const params = new URLSearchParams(window.location.search);
+  const teacherParam = params.get('teacher');
+
+  // Check auth
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) {
+    // Not logged in - redirect unless it's a teacher preview
+    if (!teacherParam) {
+      window.location.href = '/';
+      return;
+    }
+  } else {
+    currentUser = session.user;
+    // Store token for API calls
+    localStorage.setItem('sh_token', session.access_token);
+  }
+
+  if (teacherParam && getTeacher(teacherParam)) {
+    loadTeacherView(teacherParam);
+    return;
+  }
+
+  // Load all data from Supabase
+  showLoading('Loading your schedule...');
+  try {
+    await loadData();
+    await loadSettings();
+    const logEntries = await dbLoadRequestLog();
+    requestLog = logEntries;
+    applySettings();
+  } catch(e) {
+    console.error('Init error:', e);
+  }
+  hideLoading();
+  renderDashboard();
+})();
 </script>
 </body>
 </html>
