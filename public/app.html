@@ -1198,95 +1198,140 @@ async function saveNewTeacher() {
 }
 
 // ── Placement Engine ──────────────────────────────────────────────────────────
-function runPlacement() {
+async function runPlacement() {
   const addr = document.getElementById('p_addr').value.trim();
   const name = document.getElementById('p_name').value.trim();
   const prefDay = document.getElementById('p_day').value;
   const prefTime = document.getElementById('p_time').value;
   if (!addr) { alert('Please enter the client address.'); return; }
 
-  const studentGeo = simGeo(addr);
+  // Show searching state
+  const btn = document.querySelector('#placement_mobile .btn-teal');
+  if (btn) { btn.disabled = true; btn.textContent = 'Finding...'; }
+  document.getElementById('placementResults').innerHTML = '<div class="empty" style="border:1px dashed var(--border);border-radius:10px"><div style="font-size:24px;margin-bottom:8px">🔍</div>Calculating drive times...</div>';
+
   logRequest({ clientName: name||'Unknown', clientAddress: addr, providerName: '—', slot: '—', status:'pending', notes: 'Search run — awaiting assignment' });
+
+  // Collect all existing student addresses for distance calculation
+  const allAddresses = new Set();
+  allAddresses.add(addr); // new student address
+  db.teachers.forEach(t => {
+    t.students.forEach(s => { if (s.address) allAddresses.add(s.address); });
+    if (t.city) allAddresses.add(t.city);
+  });
+
+  // Get real drive distances from Google Maps API
+  let distanceMap = {};
+  try {
+    const origins = [addr]; // new student address
+    const destinations = [...allAddresses].filter(a => a !== addr);
+    if (destinations.length > 0) {
+      const res = await fetch('/api/distance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origins, destinations })
+      });
+      const data = await res.json();
+      if (data.results && data.results[0]) {
+        data.results[0].destinations.forEach(d => {
+          if (d.status === 'OK') {
+            distanceMap[d.destination] = { miles: d.miles, minutes: d.minutes };
+          }
+        });
+      }
+    }
+  } catch(e) {
+    console.warn('Google Maps API unavailable, using estimates:', e.message);
+  }
+
+  // Helper: get distance from new student to an address
+  function getDist(fromAddr) {
+    // Try exact match first
+    for (const [dest, val] of Object.entries(distanceMap)) {
+      if (dest.toLowerCase().includes(fromAddr.toLowerCase().slice(0,15)) ||
+          fromAddr.toLowerCase().includes(dest.toLowerCase().slice(0,15))) {
+        return val.miles;
+      }
+    }
+    // Fallback to simGeo estimate
+    return haversine(simGeo(addr), simGeo(fromAddr));
+  }
+
+  const TIME_RANGES = {
+    'Morning (8am–12pm)': [8,12], 'Afternoon (12pm–4pm)': [12,16],
+    'After school (3pm–6pm)': [15,18], 'Evening (6pm–8pm)': [18,20], '': [0,24]
+  };
+
   const results = [];
 
   db.teachers.forEach(t => {
     if (!t.availability.length) return;
-
-    // Filter by preferred day if set
-    const availDays = t.availability.filter(a => !prefDay || a.day === prefDay);
-    if (!prefDay && t.availability.length) availDays.push(...t.availability);
     const daysToCheck = prefDay ? t.availability.filter(a=>a.day===prefDay) : t.availability;
     if (!daysToCheck.length) return;
-
-    // Distance: avg distance to student from existing students
-    let closestStudentDist = 999;
-    let routeAddDist = 0;
-    if (t.students.length > 0) {
-      t.students.forEach(s => {
-        const sg = simGeo(s.address);
-        const d = haversine(sg, studentGeo);
-        if (d < closestStudentDist) closestStudentDist = d;
-      });
-      routeAddDist = closestStudentDist;
-    } else {
-      // No students yet — use city location
-      const cityGeo = simGeo(t.city);
-      closestStudentDist = haversine(cityGeo, studentGeo);
-      routeAddDist = closestStudentDist;
-    }
-
-    // Open slot count
-    const openSlots = slotCount(t);
-    if (openSlots <= 0) return;
 
     // Build available slot times
     const slotList = [];
     daysToCheck.forEach(a => {
-      let cur = parseInt(a.from.split(':')[0])*60+parseInt(a.from.split(':')[1]);
-      const end = parseInt(a.to.split(':')[0])*60+parseInt(a.to.split(':')[1]);
+      let cur = parseInt(a.from)*60+parseInt(a.from.split(':')[1]);
+      const end = parseInt(a.to)*60+parseInt(a.to.split(':')[1]);
       while (cur+cfg.apptDuration <= end) {
         const hh = Math.floor(cur/60).toString().padStart(2,'0');
         const mm = (cur%60).toString().padStart(2,'0');
-        const slot = `${a.day.slice(0,3)} ${fmtTime(hh+':'+mm)}`;
-        // Check if occupied
         const occupied = t.students.some(s=>s.day===a.day.slice(0,3)&&s.time===hh+':'+mm);
-        if (!occupied) slotList.push(slot);
+        if (!occupied) slotList.push(a.day.slice(0,3)+' '+fmtTime(hh+':'+mm));
         cur += cfg.apptDuration;
       }
     });
+    if (!slotList.length) return;
 
-    // Time preference filter hint
+    // Calculate distance from new student to closest existing student
+    let closestDist = 999;
+    if (t.students.length > 0) {
+      t.students.forEach(s => {
+        const d = getDist(s.address);
+        if (d < closestDist) closestDist = d;
+      });
+    } else {
+      closestDist = getDist(t.city || '');
+    }
+
+    // Time preference penalty
     let timePenalty = 0;
     if (prefTime && slotList.length) {
-      const matches = slotList.filter(s=>{
-        const h = parseInt(s.split(' ')[1]);
-        if (prefTime.includes('Morning')) return h>=8&&h<12;
-        if (prefTime.includes('Afternoon')) return h>=12&&h<16;
-        if (prefTime.includes('After school')) return h>=15&&h<18;
-        if (prefTime.includes('Evening')) return h>=18;
-        return true;
+      const [tStart, tEnd] = TIME_RANGES[prefTime] || [0,24];
+      const matches = slotList.filter(s => {
+        const parts = s.split(' ');
+        let h = parseInt(parts[1]); const ap = parts[2];
+        if (ap==='PM'&&h!==12) h+=12; if(ap==='AM'&&h===12) h=0;
+        return h >= tStart && h < tEnd;
       });
       if (!matches.length) timePenalty = 20;
     }
 
-    // Score (lower is better): distance miles * 3 + penalty
-    const score = routeAddDist * 3 + timePenalty;
-
-    results.push({ teacher: t, score, dist: routeAddDist, openSlots, slotList });
+    const score = closestDist * 3 + timePenalty;
+    const openSlots = slotList.length;
+    results.push({ teacher: t, score, dist: closestDist, openSlots, slotList });
   });
 
-  results.sort((a,b)=>a.score-b.score);
+  results.sort((a,b) => a.score - b.score);
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Find best provider →'; }
 
   const el = document.getElementById('placementResults');
   if (!results.length) {
-    el.innerHTML = `<div class="empty" style="border:1px dashed var(--border);border-radius:10px">No providers have availability for that combination. Try a different day or time.</div>`;
+    el.innerHTML = '<div class="empty" style="border:1px dashed var(--border);border-radius:10px">No providers available for that combination. Try a different day or time.</div>';
     return;
   }
 
-  el.innerHTML = `<div style="font-size:13px;font-weight:500;color:var(--navy);margin-bottom:10px">Best matches for ${name||'new client'} at ${addr}</div>`
+  const hasRealDistances = Object.keys(distanceMap).length > 0;
+  el.innerHTML = `<div style="font-size:13px;font-weight:500;color:var(--navy);margin-bottom:10px">
+    Best matches for ${name||'new client'} at ${addr}
+    <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:6px">${hasRealDistances ? '📍 Real drive times' : '📍 Estimated distance'}</span>
+  </div>`
     + results.slice(0,5).map((r,i) => {
     const c = AVATAR_COLORS[r.teacher.color%AVATAR_COLORS.length];
     const rankClass = i===0?'result-rank-1':i===1?'result-rank-2':'result-rank-3';
+    const distLabel = r.dist < 1 ? (r.dist*5280).toFixed(0)+' ft' : r.dist.toFixed(1)+' mi';
     return `<div class="result-card">
       <div class="result-rank ${rankClass}"></div>
       <div class="result-inner">
@@ -1299,12 +1344,12 @@ function runPlacement() {
             </div>
           </div>
           <div style="text-align:right">
-            <div style="font-size:13px;font-weight:500;color:var(--navy)">${r.dist<1?(r.dist*5280).toFixed(0)+' ft':r.dist.toFixed(1)+' mi'} from route</div>
+            <div style="font-size:13px;font-weight:500;color:var(--navy)">${distLabel} from route</div>
             <div style="font-size:11px;color:var(--muted)">${r.openSlots} open slot${r.openSlots!==1?'s':''}</div>
           </div>
         </div>
         <div class="result-slots">
-          ${r.slotList.slice(0,6).map(s=>`<div class="slot-chip" onclick="selectSlot(this,'${r.teacher.id}','${s}','${addr}','${name}')">${s}</div>`).join('')}
+          ${r.slotList.slice(0,6).map(s=>`<div class="slot-chip" onclick="selectSlot(this,'${r.teacher.id}','${s}','${addr.replace(/'/g,"\\'")}','${(name||'').replace(/'/g,"\\'")}')">  ${s}</div>`).join('')}
           ${r.slotList.length>6?`<span style="font-size:12px;color:var(--muted);align-self:center">+${r.slotList.length-6} more</span>`:''}
         </div>
       </div>
@@ -1339,7 +1384,7 @@ function quickPlace() {
   if (!addr) return;
   document.getElementById('p_addr').value = addr;
   showView('placement');
-  setTimeout(runPlacement, 100);
+  setTimeout(async () => await runPlacement(), 100);
 }
 
 // ── Master Schedule ───────────────────────────────────────────────────────────
