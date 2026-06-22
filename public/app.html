@@ -399,6 +399,11 @@ body {
         Settings
       </div>
     </nav>
+    <div style="margin-top:auto;padding:1.5rem">
+      <button onclick="logout()" style="width:100%;padding:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:7px;color:rgba(248,245,240,0.6);font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all 0.15s" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.06)'">
+        Sign out
+      </button>
+    </div>
   </aside>
 
   <main class="main">
@@ -2318,6 +2323,12 @@ function soloExportSchedule() {
   a.click();
 }
 
+
+// ── Logout ───────────────────────────────────────────────────────────────────
+async function logout() {
+  localStorage.removeItem('sh_token');
+  window.location.href = '/';
+}
 
 // ── Team ──────────────────────────────────────────────────────────────────────
 let currentSession = null;
