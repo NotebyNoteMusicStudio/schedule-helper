@@ -385,6 +385,10 @@ body {
         Availability
       </div>
       <div class="nav-section">Admin</div>
+      <div class="nav-item" onclick="showView('team')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.85"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Team
+      </div>
       <div class="nav-item" onclick="showView('requests')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
         Request Log
@@ -620,6 +624,18 @@ body {
       </div>
     </div>
 
+
+    <!-- ── TEAM ── -->
+    <div id="view-team" class="view content">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem">
+        <div class="section-label">Team</div>
+        <button class="btn btn-primary btn-sm" onclick="openInviteMember()">+ Invite member</button>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:1.5rem">Team members can log in and manage scheduling on your behalf. Control what they can do from here.</p>
+      <div class="card" id="teamMemberList">
+        <div class="empty">No team members yet. Invite someone to get started.</div>
+      </div>
+    </div>
     <!-- ── REQUEST LOG ── -->
     <div id="view-requests" class="view content">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem">
@@ -778,6 +794,40 @@ body {
       </div>
     </div>
   </main>
+</div>
+
+<div id="modal-inviteMember" class="modal-bg hidden">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-title">Invite Team Member</div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:1.25rem">They'll get an email with a link to set their password and access your account.</p>
+    <div class="form-group">
+      <label class="form-label">Email address</label>
+      <input class="form-input" id="invite_email" type="email" placeholder="teammate@example.com" />
+    </div>
+    <div style="background:var(--cream);border-radius:8px;padding:12px 14px;margin-bottom:1.25rem">
+      <div style="font-size:12px;font-weight:500;color:var(--navy);margin-bottom:10px">Permissions</div>
+      <div class="toggle-row" style="margin-bottom:8px">
+        <label class="toggle"><input type="checkbox" id="invite_canDelete" /><span class="toggle-slider"></span></label>
+        <div>
+          <div style="font-size:13px;font-weight:500">Can delete</div>
+          <div style="font-size:11px;color:var(--muted)">Remove providers, clients, and schedule entries</div>
+        </div>
+      </div>
+      <div class="toggle-row">
+        <label class="toggle"><input type="checkbox" id="invite_canReset" /><span class="toggle-slider"></span></label>
+        <div>
+          <div style="font-size:13px;font-weight:500">Can reset</div>
+          <div style="font-size:11px;color:var(--muted)">Run the semester reset function</div>
+        </div>
+      </div>
+    </div>
+    <div id="invite_error" class="error"></div>
+    <div id="invite_success" class="success hidden" style="background:rgba(45,122,95,0.08);border:1px solid rgba(45,122,95,0.2);border-radius:7px;padding:10px 12px;font-size:13px;color:#2d7a5f;margin-bottom:1rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-inviteMember')">Close</button>
+      <button class="btn btn-primary" id="invite_btn" onclick="sendInvite()">Send invite</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══════════════════════════════ TEACHER VIEW ═══════════════════════════════ -->
@@ -1010,7 +1060,7 @@ function getTeacher(id) { return db.teachers.find(t=>t.id===id); }
 // ── Navigation ────────────────────────────────────────────────────────────────
 const viewTitles = {
   dashboard:'Dashboard', providers:'Providers', placement:'Schedule',
-  schedule:'Master Schedule', solo:'Solo Operator', links:'Availability', requests:'Request Log', settings:'Settings'
+  schedule:'Master Schedule', solo:'Solo Operator', links:'Availability', requests:'Request Log', team:'Team', settings:'Settings'
 };
 function showView(v) {
   document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
@@ -1024,6 +1074,7 @@ function showView(v) {
   if (v==='providers') renderTeacherList();
   if (v==='solo') initSoloMode();
   if (v==='requests') renderRequestLog();
+  if (v==='team') initTeamView();
   if (v==='settings') initSettingsView();
   if (v==='schedule') renderSchedule();
   if (v==='links') renderLinks();
@@ -2267,6 +2318,142 @@ function soloExportSchedule() {
   a.click();
 }
 
+
+// ── Team ──────────────────────────────────────────────────────────────────────
+let currentSession = null;
+
+async function getSession() {
+  // Session stored after login — for now use a simple approach
+  // In production this would use Supabase client
+  return currentSession;
+}
+
+function openInviteMember() {
+  document.getElementById('invite_email').value = '';
+  document.getElementById('invite_canDelete').checked = false;
+  document.getElementById('invite_canReset').checked = false;
+  document.getElementById('invite_error').style.display = 'none';
+  document.getElementById('invite_success').classList.add('hidden');
+  document.getElementById('modal-inviteMember').classList.remove('hidden');
+}
+
+async function sendInvite() {
+  const email = document.getElementById('invite_email').value.trim();
+  const can_delete = document.getElementById('invite_canDelete').checked;
+  const can_reset = document.getElementById('invite_canReset').checked;
+  const errEl = document.getElementById('invite_error');
+  const successEl = document.getElementById('invite_success');
+  const btn = document.getElementById('invite_btn');
+
+  if (!email) { errEl.textContent = 'Please enter an email.'; errEl.style.display='block'; return; }
+
+  btn.disabled = true; btn.textContent = 'Sending...';
+
+  try {
+    const token = localStorage.getItem('sh_token');
+    const res = await fetch('/api/invite-member', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ email, can_delete, can_reset })
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      errEl.textContent = data.error; errEl.style.display='block';
+    } else {
+      successEl.textContent = `✓ Invite sent to ${email}. They'll get an email to set their password.`;
+      successEl.classList.remove('hidden');
+      errEl.style.display = 'none';
+      loadTeamMembers();
+    }
+  } catch (err) {
+    errEl.textContent = 'Something went wrong. Try again.'; errEl.style.display='block';
+  }
+
+  btn.disabled = false; btn.textContent = 'Send invite';
+}
+
+async function loadTeamMembers() {
+  const token = localStorage.getItem('sh_token');
+  try {
+    const res = await fetch('/api/team', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+    renderTeamMembers(data.members || []);
+  } catch {
+    renderTeamMembers([]);
+  }
+}
+
+function renderTeamMembers(members) {
+  const el = document.getElementById('teamMemberList');
+  if (!el) return;
+  if (!members.length) {
+    el.innerHTML = '<div class="empty">No team members yet. Invite someone to get started.</div>';
+    return;
+  }
+  el.innerHTML = members.map(m => `
+    <div class="member-row">
+      <div class="avatar" style="background:var(--cream-dark);color:var(--navy);width:36px;height:36px;font-size:13px">
+        ${m.email[0].toUpperCase()}
+      </div>
+      <div class="member-info">
+        <div class="member-name">${m.email}</div>
+        <div class="member-meta">${m.status === 'pending' ? '⏳ Invite pending' : '✓ Active'} · Joined ${m.joined_at ? new Date(m.joined_at).toLocaleDateString() : 'not yet'}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-right:12px">
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" ${m.can_delete?'checked':''} onchange="updateMemberPermission('${m.id}', 'can_delete', this.checked)" />
+            <span class="toggle-slider"></span>
+          </label>
+          <span style="font-size:12px;color:var(--muted)">Can delete</span>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" ${m.can_reset?'checked':''} onchange="updateMemberPermission('${m.id}', 'can_reset', this.checked)" />
+            <span class="toggle-slider"></span>
+          </label>
+          <span style="font-size:12px;color:var(--muted)">Can reset</span>
+        </div>
+      </div>
+      <button class="btn btn-danger-ghost btn-sm" onclick="removeMember('${m.id}', '${m.email}')">Remove</button>
+    </div>
+  `).join('');
+}
+
+async function updateMemberPermission(memberId, field, value) {
+  const token = localStorage.getItem('sh_token');
+  const current = await fetch('/api/team', { headers: { 'Authorization': `Bearer ${token}` } }).then(r=>r.json());
+  const member = current.members?.find(m => m.id === memberId);
+  if (!member) return;
+
+  await fetch('/api/team', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({
+      member_id: memberId,
+      can_delete: field === 'can_delete' ? value : member.can_delete,
+      can_reset: field === 'can_reset' ? value : member.can_reset
+    })
+  });
+}
+
+async function removeMember(memberId, email) {
+  if (!confirm(`Remove ${email} from your team?`)) return;
+  const token = localStorage.getItem('sh_token');
+  await fetch('/api/team', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ member_id: memberId })
+  });
+  loadTeamMembers();
+}
+
+function initTeamView() {
+  loadTeamMembers();
+}
 // ── Request Log ───────────────────────────────────────────────────────────────
 let requestLog = [];
 let logFilter = 'all';
