@@ -208,6 +208,8 @@ async function redirectIfSubscribed(user) {
   const { data: { session } } = await sbClient.auth.getSession();
   if (!session) return;
   try {
+    // Store token for app use
+    localStorage.setItem('sh_token', session.access_token);
     // Sync GHL tags silently
     await fetch('/api/ghl-tag-sync', { method: 'POST', headers: { 'Authorization': `Bearer ${session.access_token}` } }).catch(() => {});
   } catch {}
