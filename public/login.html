@@ -146,9 +146,29 @@ body {
 // ── Config — swap these with your actual values ──
 const SUPABASE_URL = window.ENV_SUPABASE_URL || 'https://your-project.supabase.co';
 const SUPABASE_ANON_KEY = window.ENV_SUPABASE_ANON_KEY || 'your-anon-key';
-const STRIPE_PK = window.ENV_STRIPE_PK || 'pk_live_your_publishable_key';
+const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// ── Init — runs on page load ──
+(async function init() {
+  const hash = window.location.hash;
+  const hashParams = new URLSearchParams(hash.replace('#',''));
+  const type = hashParams.get('type');
+  const accessToken = hashParams.get('access_token');
+  const refreshToken = hashParams.get('refresh_token');
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  // If there's a token in the URL it's an invite or reset link
+  if (accessToken) {
+    try {
+      await sbClient.auth.setSession({ access_token: accessToken, refresh_token: refreshToken || '' });
+    } catch(e) { console.log('session set error', e); }
+    showScreen('screen-setpassword');
+    return;
+  }
+
+  // Check if already logged in
+  const { data: { session } } = await sbClient.auth.getSession();
+  if (session) await redirectIfSubscribed(session.user);
+})();
+
 // ── Sign in ──
 async function signIn() {
   const email = document.getElementById('signin-email').value.trim();
@@ -158,7 +178,7 @@ async function signIn() {
   const btn = document.getElementById('signin-btn');
   btn.disabled = true; btn.textContent = 'Signing in…';
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
   btn.disabled = false; btn.textContent = 'Sign in';
 
   if (error) { showError('signin-error', error.message); return; }
@@ -169,7 +189,7 @@ async function signIn() {
 async function redirectIfSubscribed(user) {
   if (!user) return;
   // Check subscription status via our API
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await sbClient.auth.getSession();
   try {
     const res = await fetch('/api/subscription-status', {
       headers: { 'Authorization': `Bearer ${session.access_token}` }
@@ -197,7 +217,7 @@ async function resetPassword() {
   const email = document.getElementById('forgot-email').value.trim();
   if (!email) { showError('forgot-error', 'Please enter your email.'); return; }
 
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+  const { error } = await sbClient.auth.resetPasswordForEmail(email, {
     redirectTo: `${window.location.origin}/?type=recovery`
   });
 
@@ -215,7 +235,7 @@ async function setNewPassword() {
   if (password.length < 8) { showError('setpw-error', 'Password must be at least 8 characters.'); return; }
   if (password !== confirm) { showError('setpw-error', 'Passwords do not match.'); return; }
 
-  const { error } = await supabase.auth.updateUser({ password });
+  const { error } = await sbClient.auth.updateUser({ password });
   if (error) { showError('setpw-error', error.message); return; }
 
   // New user from invite → go to billing
