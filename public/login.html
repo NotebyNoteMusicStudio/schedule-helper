@@ -180,6 +180,12 @@ function showError(id, msg) {
     showScreen('screen-setpassword');
     return;
   }
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('signout') === 'true') {
+    await sbClient.auth.signOut();
+    showScreen('screen-signin');
+    return;
+  }
 
   // Check if already logged in
   const { data: { session } } = await sbClient.auth.getSession();
