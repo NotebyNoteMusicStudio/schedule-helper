@@ -2594,6 +2594,10 @@ if (teacherParam && getTeacher(teacherParam)) {
 } else {
   renderDashboard();
 }
+  async function logout() {
+  localStorage.removeItem('sh_token');
+  window.location.href = '/';
+}
 </script>
 </body>
 </html>
