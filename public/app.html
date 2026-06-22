@@ -2326,20 +2326,8 @@ function soloExportSchedule() {
 
 // ── Logout ───────────────────────────────────────────────────────────────────
 async function logout() {
-  Object.keys(localStorage).forEach(key => {
-    if (key.startsWith('sb-')) localStorage.removeItem(key);
-  });
   localStorage.removeItem('sh_token');
-  window.location.replace('/');
-}
-
-// ── Team ──────────────────────────────────────────────────────────────────────
-let currentSession = null;
-
-async function getSession() {
-  // Session stored after login — for now use a simple approach
-  // In production this would use Supabase client
-  return currentSession;
+  window.location.href = '/?signout=true';
 }
 
 function openInviteMember() {
@@ -2596,10 +2584,6 @@ if (teacherParam && getTeacher(teacherParam)) {
   loadTeacherView(teacherParam);
 } else {
   renderDashboard();
-}
-  async function logout() {
-  localStorage.removeItem('sh_token');
-  window.location.href = '/';
 }
 </script>
 </body>
