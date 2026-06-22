@@ -188,28 +188,13 @@ async function signIn() {
 // ── Redirect logic ──
 async function redirectIfSubscribed(user) {
   if (!user) return;
-  // Check subscription status via our API
   const { data: { session } } = await sbClient.auth.getSession();
+  if (!session) return;
   try {
-    const res = await fetch('/api/subscription-status', {
-      headers: { 'Authorization': `Bearer ${session.access_token}` }
-    });
-    const data = await res.json();
-    if (data.active) {
-      // Sync GHL tags on login
-      await fetch('/api/ghl-tag-sync', { method: 'POST', headers: { 'Authorization': `Bearer ${session.access_token}` } }).catch(() => {});
-      // Pass business_type to app so it can pre-configure Settings
-      if (data.businessType) sessionStorage.setItem('sh_business_type', data.businessType);
-      window.location.href = '/app';
-    } else if (data.needsBilling) {
-      showScreen('screen-billing');
-    } else {
-      showError('signin-error', 'Your subscription is inactive. Please contact support.');
-    }
-  } catch {
-    // If API not yet set up, just redirect to app
-    window.location.href = '/app';
-  }
+    // Sync GHL tags silently
+    await fetch('/api/ghl-tag-sync', { method: 'POST', headers: { 'Authorization': `Bearer ${session.access_token}` } }).catch(() => {});
+  } catch {}
+  window.location.href = '/app';
 }
 
 // ── Forgot password ──
@@ -218,7 +203,7 @@ async function resetPassword() {
   if (!email) { showError('forgot-error', 'Please enter your email.'); return; }
 
   const { error } = await sbClient.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/?type=recovery`
+    redirectTo: `https://www.theschedulehelper.com/`
   });
 
   if (error) { showError('forgot-error', error.message); return; }
