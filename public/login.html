@@ -143,6 +143,19 @@ body {
 </div>
 
 <script>
+// Clear session BEFORE Supabase initializes if signout param present
+// This must run synchronously before anything else
+(function() {
+  if (new URLSearchParams(window.location.search).get('signout') === 'true') {
+    Object.keys(localStorage).forEach(k => { if (k.startsWith('sb-')) localStorage.removeItem(k); });
+    localStorage.removeItem('sh_token');
+    // Remove signout param from URL without reload
+    history.replaceState({}, '', '/');
+  }
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
 // ── Config — swap these with your actual values ──
 const SUPABASE_URL = 'https://kuspirqiqbrmfnktrsji.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1c3BpcnFpcWJybWZua3Ryc2ppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMTU3NzUsImV4cCI6MjA5NzY5MTc3NX0.k9WiBNwBSKjn1pMlwmYtvJNfGN_q1YeorI2tOnJuB3o';
@@ -168,9 +181,15 @@ function showError(id, msg) {
 (async function init() {
   const hash = window.location.hash;
   const hashParams = new URLSearchParams(hash.replace('#',''));
-  const type = hashParams.get('type');
   const accessToken = hashParams.get('access_token');
   const refreshToken = hashParams.get('refresh_token');
+  const errorCode = hashParams.get('error_code');
+
+  // If there's an error in the URL (expired link etc) just show sign in
+  if (errorCode) {
+    showScreen('screen-signin');
+    return;
+  }
 
   // If there's a token in the URL it's an invite or reset link
   if (accessToken) {
@@ -180,6 +199,8 @@ function showError(id, msg) {
     showScreen('screen-setpassword');
     return;
   }
+
+  // Check for logout param
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('signout') === 'true') {
     await sbClient.auth.signOut();
