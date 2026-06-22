@@ -22,10 +22,14 @@ module.exports = async (req, res) => {
   try {
     let { data: org } = await supabase.from('organizations').select('id').eq('owner_id', user.id).single();
     if (!org) {
-      const { data: newOrg } = await supabase.from('organizations').insert({ owner_id: user.id }).select('id').single();
+      const { data: newOrg, error: orgError } = await supabase
+        .from('organizations')
+        .insert({ owner_id: user.id })
+        .select('id')
+        .single();
+      if (orgError) return res.status(500).json({ error: 'Could not create org: ' + orgError.message });
       org = newOrg;
     }
-
     const { data: existing } = await supabase.from('org_members').select('id').eq('org_id', org.id).eq('email', email).single();
     if (existing) return res.status(400).json({ error: 'This person is already a team member.' });
 
