@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schedule Helper — Sign In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: #F8F5F0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+.card {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 4px 40px rgba(27,58,92,0.10);
+  width: 100%;
+  max-width: 440px;
+  overflow: hidden;
+}
+.card-header {
+  background: #1B3A5C;
+  padding: 2rem 2rem 1.75rem;
+  text-align: center;
+}
+.logo { font-family: 'Playfair Display', serif; font-size: 22px; color: #F8F5F0; }
+.logo-sub { font-size: 11px; color: #9ED5C5; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 4px; }
+.card-body { padding: 2rem; }
+.screen { display: none; }
+.screen.active { display: block; }
+.screen-title { font-family: 'Playfair Display', serif; font-size: 20px; color: #1B3A5C; margin-bottom: 0.25rem; }
+.screen-sub { font-size: 13px; color: #6b7280; margin-bottom: 1.5rem; line-height: 1.5; }
+.form-group { margin-bottom: 1rem; }
+.form-label { font-size: 12px; font-weight: 500; color: #1B3A5C; margin-bottom: 5px; display: block; letter-spacing: 0.03em; }
+.form-input {
+  width: 100%; padding: 10px 12px; font-size: 14px;
+  border: 1px solid rgba(27,58,92,0.2); border-radius: 8px;
+  background: #F8F5F0; color: #1a1a1a; font-family: 'DM Sans', sans-serif;
+  outline: none; transition: border-color 0.15s;
+}
+.form-input:focus { border-color: #5baA96; background: #fff; }
+.btn {
+  width: 100%; padding: 11px; border-radius: 8px; font-size: 14px;
+  font-weight: 500; cursor: pointer; border: none;
+  font-family: 'DM Sans', sans-serif; transition: all 0.15s;
+  margin-top: 0.5rem;
+}
+.btn-primary { background: #1B3A5C; color: #F8F5F0; }
+.btn-primary:hover { background: #152e4a; }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-ghost { background: none; border: 1px solid rgba(27,58,92,0.2); color: #1B3A5C; margin-top: 0.5rem; }
+.btn-ghost:hover { background: #F8F5F0; }
+.link { color: #1B3A5C; font-size: 13px; text-align: center; margin-top: 1rem; cursor: pointer; }
+.link span { text-decoration: underline; }
+.error { background: rgba(153,27,27,0.08); border: 1px solid rgba(153,27,27,0.2); border-radius: 7px; padding: 10px 12px; font-size: 13px; color: #991b1b; margin-bottom: 1rem; display: none; }
+.success { background: rgba(45,122,95,0.08); border: 1px solid rgba(45,122,95,0.2); border-radius: 7px; padding: 10px 12px; font-size: 13px; color: #2d7a5f; margin-bottom: 1rem; display: none; }
+.divider { display: flex; align-items: center; gap: 10px; margin: 1.25rem 0; }
+.divider::before, .divider::after { content:''; flex:1; height:1px; background:rgba(27,58,92,0.12); }
+.divider span { font-size: 12px; color: #9ca3af; }
+/* Trial info box */
+
+.trial-box strong { display: block; font-size: 14px; margin-bottom: 3px; color: #085041; }
+
+
+.price-summary strong { color: #1B3A5C; font-size: 15px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <div class="logo">Schedule Helper</div>
+    <div class="logo-sub">Schedule Helper</div>
+  </div>
+  <div class="card-body">
+
+    <!-- ── Screen 1: Sign In ── -->
+    <div id="screen-signin" class="screen active">
+      <div class="screen-title">Welcome back</div>
+      <div class="screen-sub">Sign in to your Schedule Helper account.</div>
+      <div class="error" id="signin-error"></div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" id="signin-email" placeholder="you@example.com" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" type="password" id="signin-password" placeholder="••••••••" />
+      </div>
+      <button class="btn btn-primary" id="signin-btn" onclick="signIn()">Sign in</button>
+      <div class="link" onclick="showScreen('screen-forgot')">Forgot password? <span>Reset it</span></div>
+
+    </div>
+
+    <!-- ── Screen 2: Forgot Password ── -->
+    <div id="screen-forgot" class="screen">
+      <div class="screen-title">Reset password</div>
+      <div class="screen-sub">Enter your email and we'll send a reset link.</div>
+      <div class="error" id="forgot-error"></div>
+      <div class="success" id="forgot-success"></div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" id="forgot-email" placeholder="you@example.com" />
+      </div>
+      <button class="btn btn-primary" onclick="resetPassword()">Send reset link</button>
+      <div class="link" onclick="showScreen('screen-signin')">← Back to sign in</div>
+    </div>
+
+    <!-- ── Screen 5: Set New Password (from invite/reset link) ── -->
+    <div id="screen-setpassword" class="screen">
+      <div class="screen-title">Set your password</div>
+      <div class="screen-sub">Choose a password to secure your account.</div>
+      <div class="error" id="setpw-error"></div>
+      <div class="form-group">
+        <label class="form-label">New password</label>
+        <input class="form-input" type="password" id="setpw-password" placeholder="At least 8 characters" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm password</label>
+        <input class="form-input" type="password" id="setpw-confirm" placeholder="Same password again" />
+      </div>
+      <button class="btn btn-primary" onclick="setNewPassword()">Set password & continue →</button>
+    </div>
+
+    <!-- ── Screen 6: Check Email ── -->
+    <div id="screen-checkemail" class="screen">
+      <div style="text-align:center;padding:1rem 0">
+        <div style="font-size:48px;margin-bottom:1rem">📬</div>
+        <div class="screen-title" style="text-align:center">Check your email</div>
+        <div class="screen-sub" style="text-align:center">We sent a confirmation link to <strong id="checkemail-addr"></strong>. Click it to verify your account, then come back here.</div>
+        <button class="btn btn-ghost" onclick="showScreen('screen-signin')" style="width:auto;padding:8px 20px">Back to sign in</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── Config — swap these with your actual values ──
+const SUPABASE_URL = window.ENV_SUPABASE_URL || 'https://your-project.supabase.co';
+const SUPABASE_ANON_KEY = window.ENV_SUPABASE_ANON_KEY || 'your-anon-key';
+const STRIPE_PK = window.ENV_STRIPE_PK || 'pk_live_your_publishable_key';
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// ── Sign in ──
+async function signIn() {
+  const email = document.getElementById('signin-email').value.trim();
+  const password = document.getElementById('signin-password').value;
+  if (!email || !password) { showError('signin-error', 'Please enter your email and password.'); return; }
+
+  const btn = document.getElementById('signin-btn');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  btn.disabled = false; btn.textContent = 'Sign in';
+
+  if (error) { showError('signin-error', error.message); return; }
+  await redirectIfSubscribed(data.user);
+}
+
+// ── Redirect logic ──
+async function redirectIfSubscribed(user) {
+  if (!user) return;
+  // Check subscription status via our API
+  const { data: { session } } = await supabase.auth.getSession();
+  try {
+    const res = await fetch('/api/subscription-status', {
+      headers: { 'Authorization': `Bearer ${session.access_token}` }
+    });
+    const data = await res.json();
+    if (data.active) {
+      // Sync GHL tags on login
+      await fetch('/api/ghl-tag-sync', { method: 'POST', headers: { 'Authorization': `Bearer ${session.access_token}` } }).catch(() => {});
+      // Pass business_type to app so it can pre-configure Settings
+      if (data.businessType) sessionStorage.setItem('sh_business_type', data.businessType);
+      window.location.href = '/app';
+    } else if (data.needsBilling) {
+      showScreen('screen-billing');
+    } else {
+      showError('signin-error', 'Your subscription is inactive. Please contact support.');
+    }
+  } catch {
+    // If API not yet set up, just redirect to app
+    window.location.href = '/app';
+  }
+}
+
+// ── Forgot password ──
+async function resetPassword() {
+  const email = document.getElementById('forgot-email').value.trim();
+  if (!email) { showError('forgot-error', 'Please enter your email.'); return; }
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/?type=recovery`
+  });
+
+  if (error) { showError('forgot-error', error.message); return; }
+
+  const s = document.getElementById('forgot-success');
+  s.textContent = 'Reset link sent! Check your email.';
+  s.style.display = 'block';
+}
+
+// ── Set new password (from invite or reset link) ──
+async function setNewPassword() {
+  const password = document.getElementById('setpw-password').value;
+  const confirm = document.getElementById('setpw-confirm').value;
+  if (password.length < 8) { showError('setpw-error', 'Password must be at least 8 characters.'); return; }
+  if (password !== confirm) { showError('setpw-error', 'Passwords do not match.'); return; }
+
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) { showError('setpw-error', error.message); return; }
+
+  // New user from invite → go to billing
+  // Existing user reset → go to app
+  const hash = window.location.hash;
+  if (hash.includes('type=invite')) {
+    showScreen('screen-billing');
+  } else {
+    window.location.href = '/app';
+  }
+}
+
+// Allow Enter key on inputs
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const active = document.querySelector('.screen.active');
+  if (!active) return;
+  const id = active.id;
+  if (id === 'screen-signin') signIn();
+  else if (id === 'screen-signup') signUp();
+  else if (id === 'screen-forgot') resetPassword();
+  else if (id === 'screen-setpassword') setNewPassword();
+});
+</script>
+</body>
+</html>
