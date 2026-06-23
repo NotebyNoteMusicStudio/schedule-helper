@@ -982,12 +982,78 @@ body {
 </div>
 
 <div id="modal-teacherDetail" class="modal-bg hidden">
-  <div class="modal">
-    <div class="modal-title" id="td_title">Teacher Detail</div>
-    <div id="td_body"></div>
+  <div class="modal" style="max-width:580px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem">
+      <div class="modal-title" id="td_title" style="margin-bottom:0">Provider Detail</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" id="td_editBtn" onclick="toggleProviderEdit()">Edit</button>
+        <button class="btn btn-danger-ghost btn-sm" onclick="deleteTeacher()">Remove</button>
+      </div>
+    </div>
+
+    <!-- View mode -->
+    <div id="td_viewMode">
+      <div id="td_body"></div>
+    </div>
+
+    <!-- Edit mode -->
+    <div id="td_editMode" class="hidden">
+      <!-- Basic info -->
+      <div class="form-row" style="margin-bottom:0.75rem">
+        <div class="form-group"><label class="form-label">First name</label><input class="form-input" id="tde_first" /></div>
+        <div class="form-group"><label class="form-label">Last name</label><input class="form-input" id="tde_last" /></div>
+      </div>
+      <div class="form-row" style="margin-bottom:1rem">
+        <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="tde_phone" /></div>
+        <div class="form-group"><label class="form-label">City / area</label><input class="form-input" id="tde_city" /></div>
+      </div>
+      <div class="form-row" style="margin-bottom:1.25rem">
+        <div class="form-group"><label class="form-label" data-cfg="serviceField">Service offered</label><input class="form-input" id="tde_instruments" /></div>
+        <div class="form-group"><label class="form-label">Specialty</label><input class="form-input" id="tde_specialty" /></div>
+      </div>
+      <div class="form-group" style="margin-bottom:1.5rem">
+        <label class="form-label">Notes</label><input class="form-input" id="tde_notes" placeholder="e.g. Great with kids, very patient" />
+      </div>
+
+      <hr class="divider" />
+
+      <!-- Availability -->
+      <div class="card-title" style="margin-bottom:0.75rem">Availability</div>
+      <div id="tde_availList" style="margin-bottom:10px"></div>
+      <div style="display:grid;grid-template-columns:130px 90px 90px auto;gap:8px;align-items:end;margin-bottom:1.5rem">
+        <div><label class="form-label">Day</label>
+          <select class="form-select" id="tde_day">
+            <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+            <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+          </select>
+        </div>
+        <div><label class="form-label">From</label><input class="form-input" type="time" id="tde_from" value="15:00" /></div>
+        <div><label class="form-label">To</label><input class="form-input" type="time" id="tde_to" value="18:00" /></div>
+        <div style="padding-top:20px"><button class="btn btn-ghost btn-sm" onclick="tdeAddAvail()">+ Add</button></div>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- Clients -->
+      <div class="card-title" style="margin-bottom:0.75rem">Clients on route</div>
+      <div id="tde_clientList" style="margin-bottom:10px"></div>
+      <div style="display:grid;grid-template-columns:60px 80px 1fr 100px auto;gap:8px;align-items:end;margin-bottom:0.5rem">
+        <div><label class="form-label">Day</label>
+          <select class="form-select" id="tde_cDay" style="padding:6px 8px;font-size:12px">
+            <option value="Mon">Mon</option><option value="Tue">Tue</option><option value="Wed">Wed</option>
+            <option value="Thu">Thu</option><option value="Fri">Fri</option><option value="Sat">Sat</option><option value="Sun">Sun</option>
+          </select>
+        </div>
+        <div><label class="form-label">Time</label><input class="form-input" type="time" id="tde_cTime" value="16:00" style="padding:6px 8px;font-size:12px" /></div>
+        <div><label class="form-label">Address</label><input class="form-input" id="tde_cAddr" placeholder="123 Main St" style="font-size:12px" /></div>
+        <div><label class="form-label">Name</label><input class="form-input" id="tde_cName" placeholder="Client" style="font-size:12px" /></div>
+        <div style="padding-top:20px"><button class="btn btn-ghost btn-sm" onclick="tdeAddClient()">+ Add</button></div>
+      </div>
+    </div>
+
     <div class="modal-actions">
-      <button class="btn btn-danger-ghost btn-sm" onclick="deleteTeacher()">Remove provider</button>
       <button class="btn btn-ghost" onclick="closeModal('modal-teacherDetail')">Close</button>
+      <button class="btn btn-primary hidden" id="td_saveBtn" onclick="saveProviderEdits()">Save changes</button>
     </div>
   </div>
 </div>
@@ -2690,6 +2756,196 @@ function exportRequestLog() {
 })();
 
 
+
+
+// ── Provider Edit ─────────────────────────────────────────────────────────────
+let tde_editingId = null;
+let tde_localAvail = [];
+let tde_localClients = [];
+
+function toggleProviderEdit() {
+  const viewMode = document.getElementById('td_viewMode');
+  const editMode = document.getElementById('td_editMode');
+  const saveBtn = document.getElementById('td_saveBtn');
+  const editBtn = document.getElementById('td_editBtn');
+  const isEditing = !editMode.classList.contains('hidden');
+
+  if (isEditing) {
+    // Switch back to view
+    editMode.classList.add('hidden');
+    viewMode.classList.remove('hidden');
+    saveBtn.classList.add('hidden');
+    editBtn.textContent = 'Edit';
+  } else {
+    // Switch to edit — populate fields
+    const t = getTeacher(db.selectedTeacherId);
+    if (!t) return;
+    tde_editingId = t.id;
+    tde_localAvail = t.availability.map(a => ({...a}));
+    tde_localClients = t.students.map(s => ({...s}));
+
+    document.getElementById('tde_first').value = t.first || '';
+    document.getElementById('tde_last').value = t.last || '';
+    document.getElementById('tde_phone').value = t.phone || '';
+    document.getElementById('tde_city').value = t.city || '';
+    document.getElementById('tde_instruments').value = t.instruments || '';
+    document.getElementById('tde_specialty').value = t.specialty || '';
+    document.getElementById('tde_notes').value = t.notes || '';
+
+    tdeRenderAvail();
+    tdeRenderClients();
+
+    editMode.classList.remove('hidden');
+    viewMode.classList.add('hidden');
+    saveBtn.classList.remove('hidden');
+    editBtn.textContent = 'Cancel';
+  }
+}
+
+function tdeRenderAvail() {
+  const el = document.getElementById('tde_availList');
+  if (!el) return;
+  if (!tde_localAvail.length) {
+    el.innerHTML = '<p style="font-size:13px;color:var(--muted);margin-bottom:4px">No availability yet.</p>';
+    return;
+  }
+  el.innerHTML = tde_localAvail.map((a, i) => `
+    <div class="avail-row">
+      <span class="avail-day">${a.day.slice(0,3)}</span>
+      <div class="avail-block">${fmtTime(a.from)} – ${fmtTime(a.to)}
+        <button onclick="tdeRemoveAvail(${i})" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--muted);margin-left:4px">×</button>
+      </div>
+    </div>`).join('');
+}
+
+function tdeAddAvail() {
+  const day = document.getElementById('tde_day').value;
+  const from = document.getElementById('tde_from').value;
+  const to = document.getElementById('tde_to').value;
+  if (!from || !to || from >= to) { alert('Please set a valid time range.'); return; }
+  tde_localAvail = tde_localAvail.filter(a => a.day !== day);
+  tde_localAvail.push({ day, from, to });
+  tde_localAvail.sort((a,b) => {
+    const order = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    return order.indexOf(a.day) - order.indexOf(b.day);
+  });
+  tdeRenderAvail();
+}
+
+function tdeRemoveAvail(idx) {
+  tde_localAvail.splice(idx, 1);
+  tdeRenderAvail();
+}
+
+function tdeRenderClients() {
+  const el = document.getElementById('tde_clientList');
+  if (!el) return;
+  if (!tde_localClients.length) {
+    el.innerHTML = '<p style="font-size:13px;color:var(--muted);margin-bottom:4px">No clients yet.</p>';
+    return;
+  }
+  el.innerHTML = tde_localClients.map((s, i) => `
+    <div style="display:grid;grid-template-columns:60px 80px 1fr 100px auto;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
+      <span style="font-weight:500">${s.day}</span>
+      <span>${fmtTime(s.time)}</span>
+      <span style="color:var(--muted)">${s.address}</span>
+      <span>${s.name}</span>
+      <button onclick="tdeRemoveClient(${i})" class="delete-btn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>`).join('');
+}
+
+function tdeAddClient() {
+  const day = document.getElementById('tde_cDay').value;
+  const time = document.getElementById('tde_cTime').value;
+  const address = document.getElementById('tde_cAddr').value.trim();
+  const name = document.getElementById('tde_cName').value.trim();
+  if (!address) { alert('Address is required.'); return; }
+  tde_localClients.push({ day, time, address, name });
+  document.getElementById('tde_cAddr').value = '';
+  document.getElementById('tde_cName').value = '';
+  tdeRenderClients();
+}
+
+function tdeRemoveClient(idx) {
+  tde_localClients.splice(idx, 1);
+  tdeRenderClients();
+}
+
+async function saveProviderEdits() {
+  const t = getTeacher(tde_editingId);
+  if (!t) return;
+
+  const btn = document.getElementById('td_saveBtn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+
+  try {
+    // Update basic info in Supabase
+    const { error } = await sb.from('providers').update({
+      first: document.getElementById('tde_first').value.trim(),
+      last: document.getElementById('tde_last').value.trim(),
+      phone: document.getElementById('tde_phone').value.trim(),
+      city: document.getElementById('tde_city').value.trim(),
+      instruments: document.getElementById('tde_instruments').value.trim(),
+      specialty: document.getElementById('tde_specialty').value.trim(),
+      notes: document.getElementById('tde_notes').value.trim()
+    }).eq('id', tde_editingId).eq('user_id', currentUser.id);
+
+    if (error) throw new Error(error.message);
+
+    // Replace availability in Supabase
+    await sb.from('availability').delete().eq('provider_id', tde_editingId);
+    for (const a of tde_localAvail) {
+      await sb.from('availability').insert({
+        user_id: currentUser.id,
+        provider_id: tde_editingId,
+        day: a.day, from_time: a.from, to_time: a.to
+      });
+    }
+
+    // Replace clients in Supabase — only delete/re-add ones changed locally
+    // Delete all then re-insert to keep it simple
+    await sb.from('appointments').delete().eq('provider_id', tde_editingId);
+    for (const s of tde_localClients) {
+      await sb.from('appointments').insert({
+        user_id: currentUser.id,
+        provider_id: tde_editingId,
+        day: s.day, time: s.time,
+        address: s.address || '', name: s.name || ''
+      });
+    }
+
+    // Update local db
+    t.first = document.getElementById('tde_first').value.trim();
+    t.last = document.getElementById('tde_last').value.trim();
+    t.phone = document.getElementById('tde_phone').value.trim();
+    t.city = document.getElementById('tde_city').value.trim();
+    t.instruments = document.getElementById('tde_instruments').value.trim();
+    t.specialty = document.getElementById('tde_specialty').value.trim();
+    t.notes = document.getElementById('tde_notes').value.trim();
+    t.availability = tde_localAvail;
+    t.students = tde_localClients;
+
+    // Switch back to view mode
+    toggleProviderEdit();
+    openTeacherDetail(tde_editingId); // refresh view
+    renderTeacherList();
+    renderDashboard();
+
+    // Toast
+    const msg = document.createElement('div');
+    msg.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1B3A5C;color:#F8F5F0;padding:12px 20px;border-radius:8px;font-size:13px;z-index:999;box-shadow:0 4px 20px rgba(0,0,0,0.2)';
+    msg.textContent = '✓ Provider updated';
+    document.body.appendChild(msg);
+    setTimeout(() => msg.remove(), 3000);
+
+  } catch(e) {
+    alert('Error saving: ' + e.message);
+  }
+
+  btn.disabled = false; btn.textContent = 'Save changes';
+}
 
 // ── Reset ─────────────────────────────────────────────────────────────────────
 function openResetModal() {
