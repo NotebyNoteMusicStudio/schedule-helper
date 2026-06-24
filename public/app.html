@@ -1065,6 +1065,21 @@ const SB_URL = 'https://kuspirqiqbrmfnktrsji.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1c3BpcnFpcWJybWZua3Ryc2ppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMTU3NzUsImV4cCI6MjA5NzY5MTc3NX0.k9WiBNwBSKjn1pMlwmYtvJNfGN_q1YeorI2tOnJuB3o';
 const sb = window.supabase.createClient(SB_URL, SB_KEY);
 let currentUser = null;
+let dataOwnerId = null;
+
+// Resolves whose studio data the logged-in user works in.
+// Owner -> themselves. Invited team member -> the org owner.
+// Falls back to the user's own id if the DB helper isn't present yet,
+// so the app keeps working even before the SQL migration is run.
+async function resolveDataOwner() {
+  if (!currentUser) { dataOwnerId = null; return; }
+  try {
+    const { data, error } = await sb.rpc('get_data_owner');
+    dataOwnerId = (!error && data) ? data : currentUser.id;
+  } catch (e) {
+    dataOwnerId = currentUser.id;
+  }
+}
 
 // ── State ──────────────────────────────────────────────────────────────────────
 const AVATAR_COLORS = [
@@ -1625,6 +1640,7 @@ async function loadTeacherView(id) {
     const { data: { session } } = await sb.auth.getSession();
     if (session) {
       currentUser = session.user;
+      await resolveDataOwner();
       await loadData();
     }
   }
@@ -1702,7 +1718,7 @@ async function tv_save() {
     await sb.from('availability').delete().eq('provider_id', providerId);
     for (const a of tv_teacher.availability) {
       await sb.from('availability').insert({
-        user_id: tv_teacher._owner_id || currentUser?.id,
+        user_id: dataOwnerId || currentUser?.id,
         provider_id: providerId,
         day: a.day,
         from_time: a.from,
@@ -1714,7 +1730,7 @@ async function tv_save() {
     await sb.from('appointments').delete().eq('provider_id', providerId);
     for (const s of tv_teacher.students) {
       await sb.from('appointments').insert({
-        user_id: tv_teacher._owner_id || currentUser?.id,
+        user_id: dataOwnerId || currentUser?.id,
         provider_id: providerId,
         day: s.day,
         time: s.time,
@@ -2890,7 +2906,7 @@ async function saveProviderEdits() {
       instruments: document.getElementById('tde_instruments').value.trim(),
       specialty: document.getElementById('tde_specialty').value.trim(),
       notes: document.getElementById('tde_notes').value.trim()
-    }).eq('id', tde_editingId).eq('user_id', currentUser.id);
+    }).eq('id', tde_editingId).eq('user_id', dataOwnerId);
 
     if (error) throw new Error(error.message);
 
@@ -2898,7 +2914,7 @@ async function saveProviderEdits() {
     await sb.from('availability').delete().eq('provider_id', tde_editingId);
     for (const a of tde_localAvail) {
       await sb.from('availability').insert({
-        user_id: currentUser.id,
+        user_id: dataOwnerId,
         provider_id: tde_editingId,
         day: a.day, from_time: a.from, to_time: a.to
       });
@@ -2909,7 +2925,7 @@ async function saveProviderEdits() {
     await sb.from('appointments').delete().eq('provider_id', tde_editingId);
     for (const s of tde_localClients) {
       await sb.from('appointments').insert({
-        user_id: currentUser.id,
+        user_id: dataOwnerId,
         provider_id: tde_editingId,
         day: s.day, time: s.time,
         address: s.address || '', name: s.name || ''
@@ -3029,7 +3045,7 @@ async function loadData() {
   const { data: providers, error } = await sb
     .from('providers')
     .select('*, availability(*), appointments(*)')
-    .eq('user_id', currentUser.id)
+    .eq('user_id', dataOwnerId)
     .order('created_at');
 
   if (error) { console.error('Load error:', error.message); return; }
@@ -3055,7 +3071,7 @@ async function loadData() {
 
 async function loadSettings() {
   if (!currentUser) return;
-  const { data } = await sb.from('user_settings').select('*').eq('user_id', currentUser.id).single();
+  const { data } = await sb.from('user_settings').select('*').eq('user_id', dataOwnerId).single();
   if (data) {
     cfg.bizName = data.biz_name || '';
     cfg.tagline = data.tagline || '';
@@ -3072,7 +3088,7 @@ async function loadSettings() {
 async function saveSettings() {
   if (!currentUser) return;
   await sb.from('user_settings').upsert({
-    user_id: currentUser.id,
+    user_id: dataOwnerId,
     biz_name: cfg.bizName,
     tagline: cfg.tagline,
     worker_label: cfg.workerLabel,
@@ -3088,7 +3104,7 @@ async function saveSettings() {
 async function dbSaveProvider(teacher) {
   if (!currentUser) return null;
   const { data, error } = await sb.from('providers').insert({
-    user_id: currentUser.id,
+    user_id: dataOwnerId,
     first: teacher.first,
     last: teacher.last,
     phone: teacher.phone || '',
@@ -3104,13 +3120,13 @@ async function dbSaveProvider(teacher) {
 
 async function dbDeleteProvider(providerId) {
   if (!currentUser) return;
-  await sb.from('providers').delete().eq('id', providerId).eq('user_id', currentUser.id);
+  await sb.from('providers').delete().eq('id', providerId).eq('user_id', dataOwnerId);
 }
 
 async function dbSaveAppointment(providerId, apt) {
   if (!currentUser) return null;
   const { data, error } = await sb.from('appointments').insert({
-    user_id: currentUser.id,
+    user_id: dataOwnerId,
     provider_id: providerId,
     day: apt.day,
     time: apt.time,
@@ -3123,13 +3139,13 @@ async function dbSaveAppointment(providerId, apt) {
 
 async function dbDeleteAppointment(appointmentId) {
   if (!currentUser) return;
-  await sb.from('appointments').delete().eq('id', appointmentId).eq('user_id', currentUser.id);
+  await sb.from('appointments').delete().eq('id', appointmentId).eq('user_id', dataOwnerId);
 }
 
 async function dbSaveAvailability(providerId, avail) {
   if (!currentUser) return null;
   const { data, error } = await sb.from('availability').insert({
-    user_id: currentUser.id,
+    user_id: dataOwnerId,
     provider_id: providerId,
     day: avail.day,
     from_time: avail.from,
@@ -3141,13 +3157,13 @@ async function dbSaveAvailability(providerId, avail) {
 
 async function dbDeleteAvailability(availId) {
   if (!currentUser) return;
-  await sb.from('availability').delete().eq('id', availId).eq('user_id', currentUser.id);
+  await sb.from('availability').delete().eq('id', availId).eq('user_id', dataOwnerId);
 }
 
 async function dbSaveLogEntry(entry) {
   if (!currentUser) return;
   await sb.from('request_log').insert({
-    user_id: currentUser.id,
+    user_id: dataOwnerId,
     log_date: entry.date || '',
     log_time: entry.time || '',
     client_name: entry.clientName || '',
@@ -3164,7 +3180,7 @@ async function dbLoadRequestLog() {
   const { data } = await sb
     .from('request_log')
     .select('*')
-    .eq('user_id', currentUser.id)
+    .eq('user_id', dataOwnerId)
     .order('created_at', { ascending: false });
   return (data || []).map(r => ({
     id: r.id,
@@ -3181,32 +3197,32 @@ async function dbLoadRequestLog() {
 
 async function dbUpdateLogStatus(id, status) {
   if (!currentUser) return;
-  await sb.from('request_log').update({ status }).eq('id', id).eq('user_id', currentUser.id);
+  await sb.from('request_log').update({ status }).eq('id', id).eq('user_id', dataOwnerId);
 }
 
 async function dbDeleteLogEntry(id) {
   if (!currentUser) return;
-  await sb.from('request_log').delete().eq('id', id).eq('user_id', currentUser.id);
+  await sb.from('request_log').delete().eq('id', id).eq('user_id', dataOwnerId);
 }
 
 async function dbClearLog() {
   if (!currentUser) return;
-  await sb.from('request_log').delete().eq('user_id', currentUser.id);
+  await sb.from('request_log').delete().eq('user_id', dataOwnerId);
 }
 
 async function dbResetClients(teacherIds) {
   if (!currentUser) return;
-  await sb.from('appointments').delete().eq('user_id', currentUser.id);
+  await sb.from('appointments').delete().eq('user_id', dataOwnerId);
 }
 
 async function dbResetAvailability() {
   if (!currentUser) return;
-  await sb.from('availability').delete().eq('user_id', currentUser.id);
+  await sb.from('availability').delete().eq('user_id', dataOwnerId);
 }
 
 async function dbResetProviders() {
   if (!currentUser) return;
-  await sb.from('providers').delete().eq('user_id', currentUser.id);
+  await sb.from('providers').delete().eq('user_id', dataOwnerId);
 }
 
 // Show loading overlay
@@ -3250,6 +3266,7 @@ function hideLoading() {
     currentUser = session.user;
     // Store token for API calls
     localStorage.setItem('sh_token', session.access_token);
+    await resolveDataOwner();
   }
 
   if (teacherParam && getTeacher(teacherParam)) {
