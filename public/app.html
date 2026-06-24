@@ -1665,6 +1665,36 @@ function previewTeacherView(id) {
   loadTeacherView(id);
 }
 
+// Standalone provider link (no login). Loads + renders the portal via the
+// token API so a teacher can fill in their own schedule without an account.
+async function loadTeacherViewByToken(token) {
+  try {
+    const res = await fetch('/api/provider-portal?token=' + encodeURIComponent(token));
+    if (!res.ok) {
+      document.body.innerHTML = '<div style="font-family:DM Sans,system-ui,sans-serif;max-width:460px;margin:80px auto;text-align:center;color:#1B3A5C;padding:0 20px"><h2 style="font-family:Playfair Display,serif">Link not found</h2><p>This scheduling link is invalid or no longer active. Please ask your coordinator for a new one.</p></div>';
+      return;
+    }
+    const data = await res.json();
+    tv_teacher = {
+      id: token,
+      first: data.provider.first || '',
+      last: data.provider.last || '',
+      availability: data.availability || [],
+      students: data.students || []
+    };
+    document.getElementById('adminShell').classList.add('hidden');
+    document.getElementById('teacherShell').classList.remove('hidden');
+    document.getElementById('tv_name').textContent = `Hi, ${tv_teacher.first || 'there'}!`;
+    const portalTag = document.querySelector('#teacherShell .nav-label-portal');
+    if (portalTag) portalTag.textContent = singular(data.worker_label || 'Providers') + ' Portal';
+    renderTVAvail();
+    renderTVStudents();
+  } catch (e) {
+    console.error('Portal load error:', e);
+    alert('Could not load your schedule. Please refresh and try again.');
+  }
+}
+
 // ── Teacher View ──────────────────────────────────────────────────────────────
 let tv_teacher = null;
 
@@ -1747,33 +1777,19 @@ async function tv_save() {
   if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
 
   try {
-    const providerId = tv_teacher.id;
-
-    // Save availability - delete old, insert new
-    await sb.from('availability').delete().eq('provider_id', providerId);
-    for (const a of tv_teacher.availability) {
-      await sb.from('availability').insert({
-        user_id: dataOwnerId || currentUser?.id,
-        provider_id: providerId,
-        day: a.day,
-        from_time: a.from,
-        to_time: a.to
-      });
+    const res = await fetch('/api/provider-portal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: tv_teacher.id,
+        availability: tv_teacher.availability,
+        students: tv_teacher.students
+      })
+    });
+    if (!res.ok) {
+      const info = await res.json().catch(() => ({}));
+      throw new Error(info.error || 'save failed');
     }
-
-    // Save students/appointments - delete old, insert new
-    await sb.from('appointments').delete().eq('provider_id', providerId);
-    for (const s of tv_teacher.students) {
-      await sb.from('appointments').insert({
-        user_id: dataOwnerId || currentUser?.id,
-        provider_id: providerId,
-        day: s.day,
-        time: s.time,
-        address: s.address || '',
-        name: s.name || ''
-      });
-    }
-
     document.getElementById('tv_saved').classList.remove('hidden');
   } catch(e) {
     console.error('Save error:', e);
@@ -3296,26 +3312,23 @@ function hideLoading() {
   const params = new URLSearchParams(window.location.search);
   const teacherParam = params.get('teacher');
 
-  // Check auth
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) {
-    // Not logged in - redirect unless it's a teacher preview
-    if (!teacherParam) {
-      window.location.href = '/';
-      return;
-    }
-  } else {
-    currentUser = session.user;
-    // Store token for API calls
-    localStorage.setItem('sh_token', session.access_token);
-    await resolveDataOwner();
-    await resolveAccess();
-  }
-
-  if (teacherParam && getTeacher(teacherParam)) {
-    loadTeacherView(teacherParam);
+  // Provider self-service link — no login required. Loads via the token API.
+  if (teacherParam) {
+    await loadTeacherViewByToken(teacherParam);
     return;
   }
+
+  // Admin app — requires a session.
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) {
+    window.location.href = '/';
+    return;
+  }
+  currentUser = session.user;
+  // Store token for API calls
+  localStorage.setItem('sh_token', session.access_token);
+  await resolveDataOwner();
+  await resolveAccess();
 
   // Load all data from Supabase
   showLoading('Loading your schedule...');
