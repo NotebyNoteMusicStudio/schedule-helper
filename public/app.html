@@ -416,7 +416,7 @@ body {
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="showView('placement')">+ Schedule</button>
         <button class="btn btn-primary btn-sm" onclick="openAddTeacher()">+ Add Provider</button>
-        <button class="btn btn-danger-ghost btn-sm" onclick="openResetModal()">↺ Reset</button>
+        <button class="btn btn-danger-ghost btn-sm" id="btn-reset" onclick="openResetModal()">↺ Reset</button>
       </div>
     </div>
 
@@ -987,7 +987,7 @@ body {
       <div class="modal-title" id="td_title" style="margin-bottom:0">Provider Detail</div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" id="td_editBtn" onclick="toggleProviderEdit()">Edit</button>
-        <button class="btn btn-danger-ghost btn-sm" onclick="deleteTeacher()">Remove</button>
+        <button class="btn btn-danger-ghost btn-sm" id="btn-delete-teacher" onclick="deleteTeacher()">Remove</button>
       </div>
     </div>
 
@@ -1079,6 +1079,40 @@ async function resolveDataOwner() {
   } catch (e) {
     dataOwnerId = currentUser.id;
   }
+}
+
+// Permission flags for the logged-in user.
+// Owner -> full power. Invited member -> per the can_delete/can_reset flags
+// the owner set on the Team screen. Defaults to full power so the owner is
+// never locked out (and so the app still works before the SQL helper exists).
+let myAccess = { isOwner: true, canDelete: true, canReset: true };
+
+async function resolveAccess() {
+  if (!currentUser) return;
+  try {
+    const { data, error } = await sb.rpc('get_my_access');
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!error && row) {
+      myAccess = {
+        isOwner: !!row.is_owner,
+        canDelete: !!row.can_delete,
+        canReset: !!row.can_reset
+      };
+    }
+  } catch (e) { /* keep full-power default on error */ }
+}
+
+// True if the user may delete individual items (providers, clients, log rows).
+function canDeleteItems() { return myAccess.isOwner || myAccess.canDelete; }
+// Reset wipes data, so it requires delete capability plus the reset flag.
+function canUseReset()    { return myAccess.isOwner || (myAccess.canDelete && myAccess.canReset); }
+
+// Hide destructive controls a restricted member shouldn't see.
+function applyAccess() {
+  const reset = document.getElementById('btn-reset');
+  if (reset) reset.style.display = canUseReset() ? '' : 'none';
+  const delTeacher = document.getElementById('btn-delete-teacher');
+  if (delTeacher) delTeacher.style.display = canDeleteItems() ? '' : 'none';
 }
 
 // ── State ──────────────────────────────────────────────────────────────────────
@@ -1238,6 +1272,7 @@ function openTeacherDetail(id) {
 }
 
 async function deleteTeacher() {
+  if (!canDeleteItems()) return alert("You don't have permission to remove providers.");
   if (!confirm('Remove this provider?')) return;
   await dbDeleteProvider(db.selectedTeacherId);
   db.teachers = db.teachers.filter(t=>t.id!==db.selectedTeacherId);
@@ -2530,6 +2565,7 @@ function openInviteMember() {
 }
 
 async function sendInvite() {
+  if (!myAccess.isOwner) return alert('Only the account owner can manage the team.');
   const email = document.getElementById('invite_email').value.trim();
   const can_delete = document.getElementById('invite_canDelete').checked;
   const can_reset = document.getElementById('invite_canReset').checked;
@@ -2610,12 +2646,13 @@ function renderTeamMembers(members) {
           <span style="font-size:12px;color:var(--muted)">Can reset</span>
         </div>
       </div>
-      <button class="btn btn-danger-ghost btn-sm" onclick="removeMember('${m.id}', '${m.email}')">Remove</button>
+      ${myAccess.isOwner ? `<button class="btn btn-danger-ghost btn-sm" onclick="removeMember('${m.id}', '${m.email}')">Remove</button>` : ''}
     </div>
   `).join('');
 }
 
 async function updateMemberPermission(memberId, field, value) {
+  if (!myAccess.isOwner) return alert('Only the account owner can manage the team.');
   const token = localStorage.getItem('sh_token');
   const current = await fetch('/api/team', { headers: { 'Authorization': `Bearer ${token}` } }).then(r=>r.json());
   const member = current.members?.find(m => m.id === memberId);
@@ -2633,6 +2670,7 @@ async function updateMemberPermission(memberId, field, value) {
 }
 
 async function removeMember(memberId, email) {
+  if (!myAccess.isOwner) return alert('Only the account owner can manage the team.');
   if (!confirm(`Remove ${email} from your team?`)) return;
   const token = localStorage.getItem('sh_token');
   await fetch('/api/team', {
@@ -2702,9 +2740,9 @@ function renderRequestLog() {
           <option value="declined" ${r.status==='declined'?'selected':''}>Declined</option>
           <option value="waitlist" ${r.status==='waitlist'?'selected':''}>Waitlist</option>
         </select>
-        <button class="delete-btn" onclick="deleteRequest('${r.id}')" title="Remove">
+        ${canDeleteItems() ? `<button class="delete-btn" onclick="deleteRequest('${r.id}')" title="Remove">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
+        </button>` : ''}
       </div>
     </div>
   `).join('');
@@ -2716,12 +2754,14 @@ async function updateRequestStatus(id, status) {
 }
 
 async function deleteRequest(id) {
+  if (!canDeleteItems()) return alert("You don't have permission to delete items.");
   await dbDeleteLogEntry(id);
   requestLog = requestLog.filter(r => String(r.id) !== String(id));
   renderRequestLog();
 }
 
 async function clearRequestLog() {
+  if (!canDeleteItems()) return alert("You don't have permission to delete items.");
   if (!requestLog.length) return;
   if (!confirm('Clear entire request log?')) return;
   await dbClearLog();
@@ -2965,6 +3005,7 @@ async function saveProviderEdits() {
 
 // ── Reset ─────────────────────────────────────────────────────────────────────
 function openResetModal() {
+  if (!canUseReset()) return alert("You don't have permission to reset data.");
   ['reset_clients','reset_avail','reset_providers','reset_log'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.checked = false;
@@ -2973,6 +3014,7 @@ function openResetModal() {
 }
 
 async function confirmReset() {
+  if (!canUseReset()) return alert("You don't have permission to reset data.");
   const clearClients   = document.getElementById('reset_clients')?.checked;
   const clearAvail     = document.getElementById('reset_avail')?.checked;
   const clearProviders = document.getElementById('reset_providers')?.checked;
@@ -3267,6 +3309,7 @@ function hideLoading() {
     // Store token for API calls
     localStorage.setItem('sh_token', session.access_token);
     await resolveDataOwner();
+    await resolveAccess();
   }
 
   if (teacherParam && getTeacher(teacherParam)) {
@@ -3287,6 +3330,7 @@ function hideLoading() {
   }
   hideLoading();
   renderDashboard();
+  applyAccess();
 })();
 </script>
 </body>
