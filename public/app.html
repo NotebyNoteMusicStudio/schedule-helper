@@ -356,7 +356,7 @@ body {
 <!-- ═══════════════════════════════ ADMIN SHELL ═══════════════════════════════ -->
 <div id="adminShell" class="shell">
   <aside class="sidebar">
-    <div class="logo"><span id="logoBizName">Schedule Helper</span><span id="logoTagline" style="font-size:13px;font-weight:300;opacity:0.7;font-family:'DM Sans',sans-serif;margin-top:2px">Scheduling &amp; Routing</span></div>
+    <div class="logo"><span id="logoBizName">Schedule Helper</span><img id="logoImg" alt="" style="display:none;max-width:170px;max-height:64px;margin-top:8px;border-radius:6px" /></div>
     <nav>
       <div class="nav-section">Manage</div>
       <div class="nav-item active" onclick="showView('dashboard')">
@@ -719,8 +719,15 @@ body {
             <div class="hint">Shows in the sidebar and portal header.</div>
           </div>
           <div class="form-group">
-            <label class="form-label">Tagline (optional)</label>
-            <input class="form-input" id="set_tagline" placeholder="Scheduling &amp; Routing" oninput="applySettings()" />
+            <label class="form-label">Logo (optional)</label>
+            <div style="display:flex;align-items:center;gap:12px">
+              <img id="set_logoPreview" alt="" style="display:none;max-width:120px;max-height:48px;border-radius:6px;border:1px solid var(--border)" />
+              <div>
+                <input type="file" id="set_logoInput" accept="image/png,image/jpeg,image/webp,image/svg+xml" onchange="handleLogoUpload(this)" style="font-size:13px" />
+                <button type="button" id="set_logoRemove" class="btn btn-ghost btn-sm" onclick="removeLogo()" style="display:none;margin-top:6px">Remove logo</button>
+              </div>
+            </div>
+            <div class="hint">Shown in the sidebar in place of a tagline. PNG or JPG, small file.</div>
           </div>
           <div class="form-group">
             <label class="form-label">Business type</label>
@@ -813,7 +820,7 @@ body {
           <div style="background:var(--cream);border-radius:8px;padding:12px">
             <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Sidebar</div>
             <div style="font-weight:500;color:var(--navy)" id="prev_biz">Your Business</div>
-            <div style="color:var(--muted);font-size:12px" id="prev_tag">Scheduling &amp; Routing</div>
+            <img id="prev_logo" alt="" style="display:none;max-width:140px;max-height:44px;margin-top:4px" />
           </div>
           <div style="background:var(--cream);border-radius:8px;padding:12px">
             <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Nav item</div>
@@ -2017,6 +2024,7 @@ function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 let cfg = {
   bizName: '',
   tagline: '',
+  logoUrl: '',
   workerLabel: 'Providers',
   clientLabel: 'Clients',
   apptLabel: 'Appointments',
@@ -2093,13 +2101,22 @@ function setClientLabel(val) {
 function initSettingsView() {
   const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
   setVal('set_bizName', cfg.bizName);
-  setVal('set_tagline', cfg.tagline);
   setVal('set_workerLabel', cfg.workerLabel);
   setVal('set_clientLabel', cfg.clientLabel);
   setVal('set_apptLabel', cfg.apptLabel);
   setVal('set_serviceFieldLabel', cfg.serviceFieldLabel);
   setVal('set_locationAddress', cfg.locationAddress);
   setVal('set_apptDuration', cfg.apptDuration);
+  // Logo preview
+  const lp = document.getElementById('set_logoPreview');
+  const lr = document.getElementById('set_logoRemove');
+  if (cfg.logoUrl) {
+    if (lp) { lp.src = cfg.logoUrl; lp.style.display = 'block'; }
+    if (lr) lr.style.display = 'inline-block';
+  } else {
+    if (lp) lp.style.display = 'none';
+    if (lr) lr.style.display = 'none';
+  }
   highlightDurationChip();
   updateDurPreview();
   // Show/hide location address field
@@ -2113,20 +2130,67 @@ function initSettingsView() {
   updatePreview();
 }
 
+function handleLogoUpload(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 2*1024*1024) { alert('Please choose an image under 2 MB.'); input.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    if (file.type === 'image/svg+xml') { setLogo(dataUrl); return; }
+    const img = new Image();
+    img.onload = () => {
+      const maxW = 320, maxH = 160;
+      const scale = Math.min(1, maxW/img.width, maxH/img.height);
+      const w = Math.round(img.width*scale), h = Math.round(img.height*scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      setLogo(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => alert('Could not read that image. Try a PNG or JPG.');
+    img.src = dataUrl;
+  };
+  reader.onerror = () => alert('Could not read that file.');
+  reader.readAsDataURL(file);
+}
+
+function setLogo(dataUrl) {
+  cfg.logoUrl = dataUrl;
+  const prev = document.getElementById('set_logoPreview');
+  if (prev) { prev.src = dataUrl; prev.style.display = 'block'; }
+  const rm = document.getElementById('set_logoRemove');
+  if (rm) rm.style.display = 'inline-block';
+  applySettings();
+}
+
+function removeLogo() {
+  cfg.logoUrl = '';
+  const prev = document.getElementById('set_logoPreview');
+  if (prev) { prev.removeAttribute('src'); prev.style.display = 'none'; }
+  const rm = document.getElementById('set_logoRemove');
+  if (rm) rm.style.display = 'none';
+  const input = document.getElementById('set_logoInput');
+  if (input) input.value = '';
+  applySettings();
+}
+
 function applySettings() {
   cfg.bizName = document.getElementById('set_bizName').value.trim();
-  cfg.tagline = document.getElementById('set_tagline').value.trim();
   const getVal = (id, fallback) => { const el = document.getElementById(id); return el ? el.value.trim() || fallback : fallback; };
   cfg.workerLabel = getVal('set_workerLabel', cfg.workerLabel || 'Providers');
   cfg.clientLabel = getVal('set_clientLabel', cfg.clientLabel || 'Clients');
   cfg.apptLabel = getVal('set_apptLabel', cfg.apptLabel || 'Appointments');
   cfg.serviceFieldLabel = getVal('set_serviceFieldLabel', cfg.serviceFieldLabel || 'Service offered');
 
-  // Sidebar logo
+  // Sidebar: business name + logo (logo replaces the old tagline)
   const logoBiz = document.getElementById('logoBizName');
-  const logoTag = document.getElementById('logoTagline');
   if (logoBiz) logoBiz.textContent = cfg.bizName || 'Schedule Helper';
-  if (logoTag) logoTag.textContent = cfg.tagline || 'Scheduling & Routing';
+  const logoImg = document.getElementById('logoImg');
+  if (logoImg) {
+    if (cfg.logoUrl) { logoImg.src = cfg.logoUrl; logoImg.style.display = 'block'; }
+    else { logoImg.removeAttribute('src'); logoImg.style.display = 'none'; }
+  }
 
   // Topbar sub
   const sub = document.getElementById('topbarSub');
@@ -2249,15 +2313,17 @@ function applySettings() {
 
 function updatePreview() {
   const biz = cfg.bizName || 'Your Business';
-  const tag = cfg.tagline || 'Scheduling & Routing';
   const workers = cfg.workerLabel || 'Providers';
   const workerSingle = singular(workers);
   const el1 = document.getElementById('prev_biz');
-  const el2 = document.getElementById('prev_tag');
+  const logo = document.getElementById('prev_logo');
   const el3 = document.getElementById('prev_workers');
   const el4 = document.getElementById('prev_worker_single');
   if (el1) el1.textContent = biz;
-  if (el2) el2.textContent = tag;
+  if (logo) {
+    if (cfg.logoUrl) { logo.src = cfg.logoUrl; logo.style.display = 'block'; }
+    else { logo.removeAttribute('src'); logo.style.display = 'none'; }
+  }
   if (el3) el3.textContent = workers;
   if (el4) el4.textContent = workerSingle;
 }
@@ -3439,6 +3505,7 @@ async function loadSettings() {
   if (data) {
     cfg.bizName = data.biz_name || '';
     cfg.tagline = data.tagline || '';
+    cfg.logoUrl = data.logo_url || '';
     cfg.workerLabel = data.worker_label || 'Providers';
     cfg.clientLabel = data.client_label || 'Clients';
     cfg.apptLabel = data.appt_label || 'Appointments';
@@ -3455,6 +3522,7 @@ async function saveSettings() {
     user_id: dataOwnerId,
     biz_name: cfg.bizName,
     tagline: cfg.tagline,
+    logo_url: cfg.logoUrl,
     worker_label: cfg.workerLabel,
     client_label: cfg.clientLabel,
     appt_label: cfg.apptLabel,
