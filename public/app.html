@@ -1111,8 +1111,8 @@ function canUseReset()    { return myAccess.isOwner || (myAccess.canDelete && my
 function applyAccess() {
   const reset = document.getElementById('btn-reset');
   if (reset) reset.style.display = canUseReset() ? '' : 'none';
-  const delTeacher = document.getElementById('btn-delete-teacher');
-  if (delTeacher) delTeacher.style.display = canDeleteItems() ? '' : 'none';
+  // Provider deletion is available to both owner and admin (Delete button on
+  // each provider card + Remove in the detail modal), so it is not hidden here.
 }
 
 // ── State ──────────────────────────────────────────────────────────────────────
@@ -1244,6 +1244,7 @@ function renderTeacherList() {
           <span class="badge ${open>0?'badge-teal':'badge-warn'}" style="display:block;margin-bottom:4px">${open>0?open+' open slots':'Full'}</span>
           <span style="font-size:12px;color:var(--muted)">${t.students.length} clients · ${t.availability.length} days avail.</span>
         </div>
+        <button class="btn btn-danger-ghost btn-sm" title="Delete provider" onclick="deleteProviderById(event, '${t.id}')" style="margin-left:10px;flex-shrink:0">Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -1272,11 +1273,23 @@ function openTeacherDetail(id) {
 }
 
 async function deleteTeacher() {
-  if (!canDeleteItems()) return alert("You don't have permission to remove providers.");
   if (!confirm('Remove this provider?')) return;
   await dbDeleteProvider(db.selectedTeacherId);
   db.teachers = db.teachers.filter(t=>t.id!==db.selectedTeacherId);
   closeModal('modal-teacherDetail');
+  renderTeacherList();
+  renderDashboard();
+}
+
+// Delete a provider straight from the list. Available to both owner and admin.
+async function deleteProviderById(ev, id) {
+  if (ev) ev.stopPropagation();
+  const t = getTeacher(id);
+  const name = t ? fullName(t) : 'this provider';
+  if (!confirm(`Remove ${name}? This also removes their availability and client assignments.`)) return;
+  await dbDeleteProvider(id);
+  db.teachers = db.teachers.filter(x => x.id !== id);
+  if (db.selectedTeacherId === id) closeModal('modal-teacherDetail');
   renderTeacherList();
   renderDashboard();
 }
