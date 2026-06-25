@@ -36,12 +36,18 @@ module.exports = async (req, res) => {
       const token = req.query.token;
       if (!isUuid(token)) return res.status(400).json({ error: 'Invalid link' });
 
-      const { data: provider, error: pErr } = await supabase
+      const { data: rows, error: pErr } = await supabase
         .from('providers')
         .select('id, user_id, first, last')
-        .eq('id', token)
-        .single();
-      if (pErr || !provider) return res.status(404).json({ error: 'Link not found' });
+        .eq('id', token);
+      if (pErr) {
+        console.error('provider-portal GET lookup error:', pErr.message);
+        return res.status(500).json({ error: 'Lookup failed', detail: pErr.message, code: pErr.code || null });
+      }
+      if (!rows || rows.length === 0) {
+        return res.status(404).json({ error: 'Link not found', debug: 'service role returned 0 rows for this id' });
+      }
+      const provider = rows[0];
 
       const [availRes, apptRes, settingsRes] = await Promise.all([
         supabase.from('availability').select('day, from_time, to_time').eq('provider_id', provider.id),
@@ -69,12 +75,18 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: 'Too many entries' });
       }
 
-      const { data: provider, error: pErr } = await supabase
+      const { data: prows, error: pErr } = await supabase
         .from('providers')
         .select('id, user_id')
-        .eq('id', token)
-        .single();
-      if (pErr || !provider) return res.status(404).json({ error: 'Link not found' });
+        .eq('id', token);
+      if (pErr) {
+        console.error('provider-portal POST lookup error:', pErr.message);
+        return res.status(500).json({ error: 'Lookup failed', detail: pErr.message, code: pErr.code || null });
+      }
+      if (!prows || prows.length === 0) {
+        return res.status(404).json({ error: 'Link not found', debug: 'service role returned 0 rows for this id' });
+      }
+      const provider = prows[0];
 
       const ownerId = provider.user_id;
 
