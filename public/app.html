@@ -987,7 +987,9 @@ body {
       <div class="modal-title" id="td_title" style="margin-bottom:0">Provider Detail</div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" id="td_editBtn" onclick="toggleProviderEdit()">Edit</button>
-        <button class="btn btn-danger-ghost btn-sm" id="btn-delete-teacher" onclick="deleteTeacher()">Remove</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportProviderStudents(db.selectedTeacherId)">↓ Export</button>
+        <button class="btn btn-teal btn-sm" onclick="archiveProviderById(null, db.selectedTeacherId)">Archive</button>
+        <button class="btn btn-danger-ghost btn-sm" id="btn-delete-teacher" onclick="deleteTeacher()">Delete</button>
       </div>
     </div>
 
@@ -1179,6 +1181,8 @@ function slotCount(t) {
 }
 
 function getTeacher(id) { return db.teachers.find(t=>t.id===id); }
+function activeTeachers() { return db.teachers.filter(t=>!t.archived); }
+function archivedTeachers() { return db.teachers.filter(t=>t.archived); }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 const viewTitles = {
@@ -1205,15 +1209,16 @@ function showView(v) {
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function renderDashboard() {
-  const totalStudents = db.teachers.reduce((a,t)=>a+t.students.length,0);
-  const totalSlots = db.teachers.reduce((a,t)=>a+slotCount(t),0);
+  const act = activeTeachers();
+  const totalStudents = act.reduce((a,t)=>a+t.students.length,0);
+  const totalSlots = act.reduce((a,t)=>a+slotCount(t),0);
   document.getElementById('statsRow').innerHTML = `
-    <div class="stat"><div class="stat-num">${db.teachers.length}</div><div class="stat-label" data-type="workers">Providers</div></div>
+    <div class="stat"><div class="stat-num">${act.length}</div><div class="stat-label" data-type="workers">Providers</div></div>
     <div class="stat"><div class="stat-num">${totalStudents}</div><div class="stat-label" data-type="clients">Active clients</div></div>
     <div class="stat"><div class="stat-num">${totalSlots}</div><div class="stat-label">Open slots</div></div>
   `;
   const list = document.getElementById('dashTeacherList');
-  list.innerHTML = db.teachers.slice(0,5).map(t=>{
+  list.innerHTML = act.slice(0,5).map(t=>{
     const c = AVATAR_COLORS[t.color%AVATAR_COLORS.length];
     const open = slotCount(t);
     return `<div class="teacher-row" onclick="openTeacherDetail('${t.id}')" style="cursor:pointer">
@@ -1230,7 +1235,14 @@ function renderDashboard() {
 // ── Teacher list ──────────────────────────────────────────────────────────────
 function renderTeacherList() {
   const el = document.getElementById('teacherListFull');
-  el.innerHTML = db.teachers.map(t=>{
+  const active = activeTeachers();
+  const archived = archivedTeachers();
+
+  let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <button class="btn btn-ghost btn-sm" onclick="exportAllStudents()">↓ Export all students</button>
+  </div>`;
+
+  html += active.map(t=>{
     const c = AVATAR_COLORS[t.color%AVATAR_COLORS.length];
     const open = slotCount(t);
     return `<div class="card" style="cursor:pointer" onclick="openTeacherDetail('${t.id}')">
@@ -1244,10 +1256,39 @@ function renderTeacherList() {
           <span class="badge ${open>0?'badge-teal':'badge-warn'}" style="display:block;margin-bottom:4px">${open>0?open+' open slots':'Full'}</span>
           <span style="font-size:12px;color:var(--muted)">${t.students.length} clients · ${t.availability.length} days avail.</span>
         </div>
-        <button class="btn btn-danger-ghost btn-sm" title="Delete provider" onclick="deleteProviderById(event, '${t.id}')" style="margin-left:10px;flex-shrink:0">Delete</button>
+        <button class="btn btn-ghost btn-sm" title="Export this provider's students" onclick="event.stopPropagation();exportProviderStudents('${t.id}')" style="margin-left:10px;flex-shrink:0">↓ Export</button>
+        <button class="btn btn-danger-ghost btn-sm" title="Archive — removes from scheduling but keeps students" onclick="archiveProviderById(event,'${t.id}')" style="flex-shrink:0">Archive</button>
       </div>
     </div>`;
   }).join('');
+
+  if (!active.length) html += `<p style="font-size:13px;color:var(--muted)">No active providers yet.</p>`;
+
+  if (archived.length) {
+    html += `<div class="card-title" style="margin-top:1.75rem">Former providers (${archived.length})</div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Their students are kept here so you can reschedule them with an active provider. Export the list, or restore the provider. Deleting permanently also removes their students.</p>`;
+    html += archived.map(t=>{
+      const c = AVATAR_COLORS[t.color%AVATAR_COLORS.length];
+      return `<div class="card">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="avatar" style="width:42px;height:42px;background:${c.bg};color:${c.tx};font-size:14px;opacity:.65">${initials(t)}</div>
+          <div style="flex:1">
+            <div style="font-size:15px;font-weight:500">${fullName(t)} <span style="font-size:11px;color:var(--muted);font-weight:400">· former</span></div>
+            <div style="font-size:12px;color:var(--muted)">${t.students.length} student${t.students.length===1?'':'s'} to reschedule</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="exportProviderStudents('${t.id}')" style="flex-shrink:0">↓ Export students</button>
+          <button class="btn btn-teal btn-sm" onclick="restoreProvider('${t.id}')" style="flex-shrink:0">Restore</button>
+          ${t.students.length ? `<button class="btn btn-ghost btn-sm" onclick="clearProviderStudents('${t.id}')" style="flex-shrink:0">Clear students</button>` : ''}
+          <button class="btn btn-danger-ghost btn-sm" onclick="deleteProviderById(event,'${t.id}')" style="flex-shrink:0">Delete permanently</button>
+        </div>
+        ${t.students.length ? `<table class="schedule-table" style="margin-top:10px"><thead><tr><th>Day</th><th>Time</th><th>Student</th><th>Address</th></tr></thead><tbody>${
+          t.students.map(s=>`<tr><td>${s.day}</td><td>${s.time?fmtTime(s.time):''}</td><td>${s.name||''}</td><td style="font-size:12px;color:var(--muted)">${s.address||''}</td></tr>`).join('')
+        }</tbody></table>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  el.innerHTML = html;
 }
 
 // ── Teacher Detail Modal ──────────────────────────────────────────────────────
@@ -1273,7 +1314,7 @@ function openTeacherDetail(id) {
 }
 
 async function deleteTeacher() {
-  if (!confirm('Remove this provider?')) return;
+  if (!confirm('Permanently delete this provider AND their students? This cannot be undone.\n\nTo keep their students for rescheduling, close this and use Archive instead.')) return;
   await dbDeleteProvider(db.selectedTeacherId);
   db.teachers = db.teachers.filter(t=>t.id!==db.selectedTeacherId);
   closeModal('modal-teacherDetail');
@@ -1286,12 +1327,86 @@ async function deleteProviderById(ev, id) {
   if (ev) ev.stopPropagation();
   const t = getTeacher(id);
   const name = t ? fullName(t) : 'this provider';
-  if (!confirm(`Remove ${name}? This also removes their availability and client assignments.`)) return;
+  if (!confirm(`Permanently delete ${name}? This also removes their availability and student assignments and cannot be undone.\n\nTo keep their students for rescheduling, use Archive instead.`)) return;
   await dbDeleteProvider(id);
   db.teachers = db.teachers.filter(x => x.id !== id);
   if (db.selectedTeacherId === id) closeModal('modal-teacherDetail');
   renderTeacherList();
   renderDashboard();
+}
+
+// ── Archive (keep students) vs permanent delete ───────────────────────────────
+async function dbSetArchived(id, archived) {
+  if (!currentUser) return { error: { message: 'not signed in' } };
+  return await sb.from('providers').update({ archived }).eq('id', id).eq('user_id', dataOwnerId);
+}
+
+async function archiveProviderById(ev, id) {
+  if (ev) ev.stopPropagation();
+  const t = getTeacher(id);
+  const name = t ? fullName(t) : 'this provider';
+  const n = t ? t.students.length : 0;
+  if (!confirm(`Archive ${name}? They'll move to "Former providers" and stop appearing in scheduling, but their ${n} student${n===1?'':'s'} stay so you can reschedule them.`)) return;
+  const { error } = await dbSetArchived(id, true);
+  if (error) { alert('Could not archive — make sure you ran the database update that adds the "archived" column.\n\n' + error.message); return; }
+  if (t) t.archived = true;
+  if (db.selectedTeacherId === id) closeModal('modal-teacherDetail');
+  renderTeacherList();
+  renderDashboard();
+}
+
+async function restoreProvider(id) {
+  const { error } = await dbSetArchived(id, false);
+  if (error) { alert('Could not restore.\n\n' + error.message); return; }
+  const t = getTeacher(id); if (t) t.archived = false;
+  renderTeacherList();
+  renderDashboard();
+}
+
+// Remove all of a provider's students at once (keeps the provider record).
+async function clearProviderStudents(id) {
+  const t = getTeacher(id);
+  if (!t) return;
+  const n = t.students ? t.students.length : 0;
+  if (!n) { alert('No students to remove.'); return; }
+  if (!confirm(`Remove all ${n} student${n===1?'':'s'} from ${fullName(t)}? This clears their schedule and can't be undone.\n\nExport the list first if you still need it.`)) return;
+  const { error } = await sb.from('appointments').delete().eq('provider_id', id).eq('user_id', dataOwnerId);
+  if (error) { alert('Could not clear students.\n\n' + error.message); return; }
+  t.students = [];
+  renderTeacherList();
+  renderDashboard();
+}
+
+// ── Export student lists (for manual rescheduling) ────────────────────────────
+function csvCell(v){ return '"' + String(v==null?'':v).replace(/"/g,'""') + '"'; }
+function studentsCsv(teachers) {
+  let csv = 'Provider,Status,Student,Day,Time,Address\n';
+  teachers.forEach(t => {
+    const status = t.archived ? 'Former' : 'Active';
+    (t.students||[]).forEach(s => {
+      csv += [
+        csvCell(fullName(t)), csvCell(status), csvCell(s.name),
+        csvCell(s.day), csvCell(s.time ? fmtTime(s.time) : ''), csvCell(s.address)
+      ].join(',') + '\n';
+    });
+  });
+  return csv;
+}
+function csvDownload(csv, filename) {
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = filename;
+  a.click();
+}
+function exportProviderStudents(id) {
+  const t = getTeacher(id);
+  if (!t) return;
+  if (!t.students || !t.students.length) { alert('This provider has no students to export.'); return; }
+  csvDownload(studentsCsv([t]), (fullName(t)||'provider').replace(/[^a-z0-9]+/gi,'-').toLowerCase() + '-students.csv');
+}
+function exportAllStudents() {
+  if (!db.teachers.some(t => (t.students||[]).length)) { alert('No students to export yet.'); return; }
+  csvDownload(studentsCsv(db.teachers), 'all-students.csv');
 }
 
 // ── Add Teacher ───────────────────────────────────────────────────────────────
@@ -1344,7 +1459,7 @@ async function runPlacement() {
   // Collect all existing student addresses for distance calculation
   const allAddresses = new Set();
   allAddresses.add(addr); // new student address
-  db.teachers.forEach(t => {
+  activeTeachers().forEach(t => {
     t.students.forEach(s => { if (s.address) allAddresses.add(s.address); });
     if (t.city) allAddresses.add(t.city);
   });
@@ -1393,7 +1508,7 @@ async function runPlacement() {
 
   const results = [];
 
-  db.teachers.forEach(t => {
+  activeTeachers().forEach(t => {
     if (!t.availability.length) return;
     const daysToCheck = prefDay ? t.availability.filter(a=>a.day===prefDay) : t.availability;
     if (!daysToCheck.length) return;
@@ -1659,7 +1774,7 @@ function renderScheduleMonth() {
 // ── Teacher Links ─────────────────────────────────────────────────────────────
 function renderLinks() {
   const el = document.getElementById('linksList');
-  el.innerHTML = db.teachers.map(t=>{
+  el.innerHTML = activeTeachers().map(t=>{
     const c=AVATAR_COLORS[t.color%AVATAR_COLORS.length];
     const url = window.location.href.split('?')[0]+'?teacher='+t.id;
     return `<div class="card" style="display:flex;align-items:center;gap:12px">
@@ -2104,7 +2219,7 @@ function runLocationPlacement() {
 
   const results = [];
 
-  db.teachers.forEach(t => {
+  activeTeachers().forEach(t => {
     if (!t.availability.length) return;
 
     // Filter by preferred day
@@ -3123,6 +3238,7 @@ async function loadData() {
 
   db.teachers = (providers || []).map(p => ({
     id: p.id,
+    archived: p.archived || false,
     first: p.first || '',
     last: p.last || '',
     phone: p.phone || '',
