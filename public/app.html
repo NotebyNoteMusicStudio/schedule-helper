@@ -376,13 +376,13 @@ body {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
         Master Schedule
       </div>
+      <div class="nav-item" onclick="showView('links')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        Select Availability
+      </div>
       <div class="nav-item" onclick="showView('solo')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
         Solo Operator
-      </div>
-      <div class="nav-item" onclick="showView('links')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        Availability
       </div>
       <div class="nav-section">Admin</div>
       <div class="nav-item" onclick="showView('team')">
@@ -702,7 +702,7 @@ body {
     </div>
     <!-- ── TEACHER LINKS ── -->
     <div id="view-links" class="view content">
-      <div class="section-label" style="margin-bottom:0.5rem">Availability</div>
+      <div class="section-label" style="margin-bottom:0.5rem">Select Availability</div>
       <p style="font-size:13px;color:var(--muted);margin-bottom:1.5rem">Send each provider their unique link so they can enter their own schedule and client addresses.</p>
       <div id="linksList"></div>
     </div>
@@ -751,14 +751,20 @@ body {
           <div class="form-group">
             <label class="form-label">What do you call your workers?</label>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px" id="workerPresets">
-              <button class="slot-chip" onclick="setWorkerLabel('Providers')">Providers</button>
-              <button class="slot-chip" onclick="setWorkerLabel('Workers')">Workers</button>
-              <button class="slot-chip" onclick="setWorkerLabel('Technicians')">Technicians</button>
-              <button class="slot-chip" onclick="setWorkerLabel('Cleaners')">Cleaners</button>
-              <button class="slot-chip" onclick="setWorkerLabel('Tutors')">Tutors</button>
-              <button class="slot-chip" onclick="setWorkerLabel('Sitters')">Sitters</button>
-              <button class="slot-chip" onclick="setWorkerLabel('Reps')">Reps</button>
-              <button class="slot-chip" onclick="setWorkerLabel('Therapists')">Therapists</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Teacher')">Teacher</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Instructor')">Instructor</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Cleaner')">Cleaner</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Technician')">Technician</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Therapist')">Therapist</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Tutor')">Tutor</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Groomer')">Groomer</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Coach')">Coach</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Stylist')">Stylist</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Professional')">Professional</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Specialist')">Specialist</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Service Pro')">Service Pro</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Sitter')">Sitter</button>
+              <button class="slot-chip" onclick="setWorkerLabel('Provider')">Provider</button>
             </div>
             <input class="form-input" id="set_workerLabel" placeholder="Providers" oninput="applySettings()" />
             <div class="hint">Singular will be auto-detected (e.g. "Workers" → "Worker").</div>
@@ -1299,7 +1305,7 @@ function archivedTeachers() { return db.teachers.filter(t=>t.archived); }
 // ── Navigation ────────────────────────────────────────────────────────────────
 const viewTitles = {
   dashboard:'Dashboard', providers:'Providers', placement:'Schedule',
-  schedule:'Master Schedule', solo:'Solo Operator', links:'Availability', requests:'Request Log', team:'Admin', settings:'Settings'
+  schedule:'Master Schedule', solo:'Solo Operator', links:'Select Availability', requests:'Request Log', team:'Admin', settings:'Settings'
 };
 function showView(v) {
   document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
@@ -2288,10 +2294,7 @@ function applySettings() {
         el.childNodes[el.childNodes.length-1].textContent = '\n        '+cfg.workerLabel+'\n      ';
       }
     }
-    // Availability nav
-    if (el.getAttribute('onclick') && el.getAttribute('onclick').includes("'links'")) {
-      el.childNodes[el.childNodes.length-1].textContent = '\n        '+cfg.workerLabel+' Links\n      ';
-    }
+    // Links nav is a fixed label ("Select Availability") — not relabeled by worker label.
   });
   cfg._prevWorkerLabel = cfg.workerLabel;
 
@@ -2330,9 +2333,9 @@ function applySettings() {
     if (el.dataset.type === 'clients') el.textContent = 'Active ' + cfg.clientLabel.toLowerCase();
   });
 
-  // Links page heading
+  // Links page heading (fixed label)
   const linksHead = document.querySelector('#view-links .section-label');
-  if (linksHead) linksHead.textContent = singular(cfg.workerLabel) + ' Availability Links';
+  if (linksHead) linksHead.textContent = 'Select Availability';
   const linksSub = document.querySelector('#view-links p');
   if (linksSub) linksSub.textContent = 'Send each ' + singular(cfg.workerLabel).toLowerCase() + ' their unique link so they can enter their own schedule and client addresses.';
 
