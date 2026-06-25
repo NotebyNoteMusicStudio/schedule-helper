@@ -997,6 +997,13 @@ body {
 <div id="modal-addTeacher" class="modal-bg hidden">
   <div class="modal">
     <div class="modal-title">Add Provider</div>
+    <div class="form-group" style="display:flex;align-items:center;gap:14px">
+      <span id="at_photoPreview" class="avatar" style="width:56px;height:56px;overflow:hidden;background:var(--cream-dark);color:var(--muted)"><span style="font-size:20px;color:var(--muted)">＋</span></span>
+      <div>
+        <label class="form-label">Photo (optional)</label>
+        <input type="file" id="at_photoInput" accept="image/png,image/jpeg,image/webp" onchange="handleProviderPhoto(this,'at')" style="font-size:13px" />
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">First name</label><input class="form-input" id="at_first" placeholder="Sarah" /></div>
       <div class="form-group"><label class="form-label">Last name</label><input class="form-input" id="at_last" placeholder="Miller" /></div>
@@ -1034,6 +1041,14 @@ body {
 
     <!-- Edit mode -->
     <div id="td_editMode" class="hidden">
+      <div class="form-group" style="display:flex;align-items:center;gap:14px;margin-bottom:1rem">
+        <span id="tde_photoPreview" class="avatar" style="width:56px;height:56px;overflow:hidden;background:var(--cream-dark);color:var(--muted)"></span>
+        <div>
+          <label class="form-label">Photo</label>
+          <input type="file" id="tde_photoInput" accept="image/png,image/jpeg,image/webp" onchange="handleProviderPhoto(this,'tde')" style="font-size:13px" />
+          <button type="button" class="btn btn-ghost btn-sm" onclick="clearProviderPhoto('tde')" style="margin-top:6px">Remove photo</button>
+        </div>
+      </div>
       <!-- Basic info -->
       <div class="form-row" style="margin-bottom:0.75rem">
         <div class="form-group"><label class="form-label">First name</label><input class="form-input" id="tde_first" /></div>
@@ -1199,6 +1214,68 @@ function haversine(a, b) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function initials(t) { return (t.first[0]+(t.last[0]||'')).toUpperCase(); }
+
+// Renders a provider avatar: their photo if set, otherwise colored initials.
+function avatarHtml(t, size, fontSize, extra='') {
+  const dim = size ? `width:${size}px;height:${size}px;` : '';
+  if (t.photo) {
+    return `<span class="avatar" style="${dim}overflow:hidden;${extra}"><img src="${t.photo}" alt="" style="width:100%;height:100%;object-fit:cover" /></span>`;
+  }
+  const c = AVATAR_COLORS[t.color%AVATAR_COLORS.length];
+  const fs = fontSize ? `font-size:${fontSize}px;` : '';
+  return `<div class="avatar" style="${dim}${fs}background:${c.bg};color:${c.tx};${extra}">${initials(t)}</div>`;
+}
+
+// Pending photo data (base64) while adding/editing, before save.
+let atPhotoData = '';
+let tdePhotoData = '';
+
+// Read an image file, square-crop + downscale, return a small data URL.
+function processImageFile(file, maxDim, cb) {
+  if (!file) return;
+  if (file.size > 4*1024*1024) { alert('Please choose an image under 4 MB.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const side = Math.min(img.width, img.height);
+      const sx = (img.width - side)/2, sy = (img.height - side)/2;
+      const canvas = document.createElement('canvas');
+      canvas.width = maxDim; canvas.height = maxDim;
+      canvas.getContext('2d').drawImage(img, sx, sy, side, side, 0, 0, maxDim, maxDim);
+      cb(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => alert('Could not read that image. Try a PNG or JPG.');
+    img.src = reader.result;
+  };
+  reader.onerror = () => alert('Could not read that file.');
+  reader.readAsDataURL(file);
+}
+
+function setPhotoPreview(id, dataUrl) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = dataUrl ? `<img src="${dataUrl}" alt="" style="width:100%;height:100%;object-fit:cover" />` : '';
+}
+
+function handleProviderPhoto(input, which) {
+  const file = input.files && input.files[0];
+  processImageFile(file, 200, (dataUrl) => {
+    if (which === 'at') { atPhotoData = dataUrl; setPhotoPreview('at_photoPreview', dataUrl); }
+    else { tdePhotoData = dataUrl; setPhotoPreview('tde_photoPreview', dataUrl); }
+  });
+}
+
+function clearProviderPhoto(which) {
+  if (which === 'at') {
+    atPhotoData = '';
+    const p = document.getElementById('at_photoPreview'); if (p) p.innerHTML = '<span style="font-size:20px;color:var(--muted)">＋</span>';
+    const i = document.getElementById('at_photoInput'); if (i) i.value = '';
+  } else {
+    tdePhotoData = '';
+    setPhotoPreview('tde_photoPreview', '');
+    const i = document.getElementById('tde_photoInput'); if (i) i.value = '';
+  }
+}
 function fullName(t) { return t.first+' '+t.last; }
 function fmtTime(t) {
   const [h,m] = t.split(':').map(Number);
@@ -1256,7 +1333,7 @@ function renderDashboard() {
     const c = AVATAR_COLORS[t.color%AVATAR_COLORS.length];
     const open = slotCount(t);
     return `<div class="teacher-row" onclick="openTeacherDetail('${t.id}')" style="cursor:pointer">
-      <div class="avatar" style="background:${c.bg};color:${c.tx}">${initials(t)}</div>
+      ${avatarHtml(t)}
       <div class="teacher-info">
         <div class="teacher-name-row">${fullName(t)}</div>
         <div class="teacher-meta">${t.city}</div>
@@ -1281,7 +1358,7 @@ function renderTeacherList() {
     const open = slotCount(t);
     return `<div class="card" style="cursor:pointer" onclick="openTeacherDetail('${t.id}')">
       <div style="display:flex;align-items:center;gap:12px">
-        <div class="avatar" style="width:42px;height:42px;background:${c.bg};color:${c.tx};font-size:14px">${initials(t)}</div>
+        ${avatarHtml(t, 42, 14)}
         <div style="flex:1">
           <div style="font-size:15px;font-weight:500">${fullName(t)}</div>
           <div style="font-size:12px;color:var(--muted)">${t.city} · ${t.instruments}</div>
@@ -1305,7 +1382,7 @@ function renderTeacherList() {
       const c = AVATAR_COLORS[t.color%AVATAR_COLORS.length];
       return `<div class="card">
         <div style="display:flex;align-items:center;gap:12px">
-          <div class="avatar" style="width:42px;height:42px;background:${c.bg};color:${c.tx};font-size:14px;opacity:.65">${initials(t)}</div>
+          ${avatarHtml(t, 42, 14, 'opacity:.65')}
           <div style="flex:1">
             <div style="font-size:15px;font-weight:500">${fullName(t)} <span style="font-size:11px;color:var(--muted);font-weight:400">· former</span></div>
             <div style="font-size:12px;color:var(--muted)">${t.students.length} student${t.students.length===1?'':'s'} to reschedule</div>
@@ -1332,10 +1409,13 @@ function openTeacherDetail(id) {
   document.getElementById('td_title').textContent = fullName(t);
   const c = AVATAR_COLORS[t.color%AVATAR_COLORS.length];
   document.getElementById('td_body').innerHTML = `
-    <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;margin-bottom:1.25rem">
-      <span style="color:var(--muted)">Area</span><span>${t.city}</span>
-      <span style="color:var(--muted)">${cfg.serviceFieldLabel||'Service offered'}</span><span>${t.instruments}</span>
-      <span style="color:var(--muted)">Phone</span><span>${t.phone}</span>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:1.25rem">
+      ${avatarHtml(t, 56, 18)}
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;flex:1">
+        <span style="color:var(--muted)">Area</span><span>${t.city}</span>
+        <span style="color:var(--muted)">${cfg.serviceFieldLabel||'Service offered'}</span><span>${t.instruments}</span>
+        <span style="color:var(--muted)">Phone</span><span>${t.phone}</span>
+      </div>
     </div>
     <div class="card-title">Availability</div>
     ${t.availability.length?t.availability.map(a=>`<div class="avail-row"><span class="avail-day">${a.day.slice(0,3)}</span><div class="avail-block">${fmtTime(a.from)} – ${fmtTime(a.to)}</div></div>`).join(''):'<p style="font-size:13px;color:var(--muted)">No availability entered yet.</p>'}
@@ -1446,6 +1526,7 @@ function exportAllStudents() {
 // ── Add Teacher ───────────────────────────────────────────────────────────────
 function openAddTeacher() {
   ['at_first','at_last','at_phone','at_city','at_instruments','at_specialty','at_notes'].forEach(id=>document.getElementById(id).value='');
+  clearProviderPhoto('at');
   document.getElementById('modal-addTeacher').classList.remove('hidden');
 }
 
@@ -1460,6 +1541,7 @@ async function saveNewTeacher() {
     instruments: document.getElementById('at_instruments').value,
     specialty: document.getElementById('at_specialty').value,
     notes: document.getElementById('at_notes').value,
+    photo: atPhotoData,
     color
   });
   if (!saved) return alert('Error saving provider. Please try again.');
@@ -1468,6 +1550,7 @@ async function saveNewTeacher() {
     phone: saved.phone, city: saved.city,
     instruments: saved.instruments, specialty: saved.specialty,
     notes: saved.notes, color,
+    photo: saved.photo_url || '',
     availability: [], students: []
   });
   closeModal('modal-addTeacher');
@@ -1671,7 +1754,7 @@ async function runPlacement() {
       <div class="result-inner">
         <div class="result-header">
           <div style="display:flex;align-items:center;gap:10px">
-            <div class="avatar" style="background:${c.bg};color:${c.tx};width:30px;height:30px;font-size:11px">${initials(r.teacher)}</div>
+            ${avatarHtml(r.teacher, 30, 11)}
             <div>
               <div class="result-teacher">${fullName(r.teacher)}</div>
               <div style="font-size:12px;color:var(--muted)">${r.teacher.city}</div>
@@ -1758,7 +1841,7 @@ function renderScheduleList() {
     + allSlots.map(s=>{
       const c=AVATAR_COLORS[s.teacher.color%AVATAR_COLORS.length];
       return `<tr><td><span class="badge badge-navy">${s.day}</span></td><td>${fmtTime(s.time)}</td>
-        <td><span style="display:inline-flex;align-items:center;gap:6px"><span class="avatar" style="width:22px;height:22px;font-size:9px;background:${c.bg};color:${c.tx}">${initials(s.teacher)}</span>${s.teacher.first} ${s.teacher.last}</span></td>
+        <td><span style="display:inline-flex;align-items:center;gap:6px">${avatarHtml(s.teacher, 22, 9)}${s.teacher.first} ${s.teacher.last}</span></td>
         <td>${s.name}</td><td style="font-size:12px;color:var(--muted)">${s.address}</td></tr>`;
     }).join('')
     + '</tbody></table>';
@@ -1867,7 +1950,7 @@ function renderLinks() {
     const c=AVATAR_COLORS[t.color%AVATAR_COLORS.length];
     const url = window.location.href.split('?')[0]+'?teacher='+t.id;
     return `<div class="card" style="display:flex;align-items:center;gap:12px">
-      <div class="avatar" style="background:${c.bg};color:${c.tx}">${initials(t)}</div>
+      ${avatarHtml(t)}
       <div style="flex:1">
         <div style="font-size:14px;font-weight:500">${fullName(t)}</div>
         <div style="font-size:12px;color:var(--muted);font-family:monospace;margin-top:2px">${url}</div>
@@ -2463,7 +2546,7 @@ function runLocationPlacement() {
         <div class="result-inner">
           <div class="result-header">
             <div style="display:flex;align-items:center;gap:10px">
-              <div class="avatar" style="background:${c.bg};color:${c.tx};width:30px;height:30px;font-size:11px">${initials(r.teacher)}</div>
+              ${avatarHtml(r.teacher, 30, 11)}
               <div>
                 <div class="result-teacher">${fullName(r.teacher)}</div>
                 <div style="font-size:12px;color:var(--muted)">${r.teacher.instruments}${r.teacher.specialty?' · '+r.teacher.specialty:''}</div>
@@ -3235,6 +3318,11 @@ function toggleProviderEdit() {
     document.getElementById('tde_specialty').value = t.specialty || '';
     document.getElementById('tde_notes').value = t.notes || '';
 
+    tdePhotoData = t.photo || '';
+    const pv = document.getElementById('tde_photoPreview');
+    if (pv) pv.innerHTML = tdePhotoData ? `<img src="${tdePhotoData}" alt="" style="width:100%;height:100%;object-fit:cover" />` : `<span style="font-size:16px;color:var(--muted)">${initials(t)}</span>`;
+    const pi = document.getElementById('tde_photoInput'); if (pi) pi.value = '';
+
     tdeRenderAvail();
     tdeRenderClients();
 
@@ -3332,7 +3420,8 @@ async function saveProviderEdits() {
       city: document.getElementById('tde_city').value.trim(),
       instruments: document.getElementById('tde_instruments').value.trim(),
       specialty: document.getElementById('tde_specialty').value.trim(),
-      notes: document.getElementById('tde_notes').value.trim()
+      notes: document.getElementById('tde_notes').value.trim(),
+      photo_url: tdePhotoData || null
     }).eq('id', tde_editingId).eq('user_id', dataOwnerId);
 
     if (error) throw new Error(error.message);
@@ -3367,6 +3456,7 @@ async function saveProviderEdits() {
     t.instruments = document.getElementById('tde_instruments').value.trim();
     t.specialty = document.getElementById('tde_specialty').value.trim();
     t.notes = document.getElementById('tde_notes').value.trim();
+    t.photo = tdePhotoData || '';
     t.availability = tde_localAvail;
     t.students = tde_localClients;
 
@@ -3482,6 +3572,7 @@ async function loadData() {
   db.teachers = (providers || []).map(p => ({
     id: p.id,
     archived: p.archived || false,
+    photo: p.photo_url || '',
     first: p.first || '',
     last: p.last || '',
     phone: p.phone || '',
@@ -3544,7 +3635,8 @@ async function dbSaveProvider(teacher) {
     instruments: teacher.instruments || '',
     specialty: teacher.specialty || '',
     notes: teacher.notes || '',
-    color: teacher.color || 0
+    color: teacher.color || 0,
+    photo_url: teacher.photo || null
   }).select().single();
   if (error) { console.error('Save provider error:', error.message); return null; }
   return data;
