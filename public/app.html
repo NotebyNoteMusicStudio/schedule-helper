@@ -489,6 +489,16 @@ body {
               </div>
             </div>
             <div class="form-group">
+              <label class="form-label">Travel buffer between visits</label>
+              <select class="form-select" id="p_buffer">
+                <option value="0">No buffer (drive time only)</option>
+                <option value="10">10 min</option>
+                <option value="15" selected>15 min</option>
+                <option value="20">20 min</option>
+                <option value="30">30 min</option>
+              </select>
+            </div>
+            <div class="form-group">
               <label class="form-label"><label class="form-label" data-cfg="serviceField" style="display:contents">Service type</label>
               <input class="form-input" id="p_instrument" placeholder="e.g. Cleaning, tutoring, dog walking…" />
             </div>
@@ -528,7 +538,24 @@ body {
         <div class="section-label">Solo Operator</div>
         <button class="btn btn-teal btn-sm" onclick="runSoloPlacement()">⚡ Auto-place all clients</button>
       </div>
-      <p style="font-size:13px;color:var(--muted);margin-bottom:1.25rem">For a single provider managing their own schedule. Set your availability, add client requests, and let the system build your week.</p>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:0.75rem">For a single provider managing their own schedule. Set your availability, add client requests, and let the system build your week.</p>
+
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1.25rem">
+        <span style="font-size:13px;color:var(--muted)">How do you work?</span>
+        <button id="solo_mode_mobile" class="btn btn-sm" onclick="setSoloMode('mobile')">🚗 I travel to clients</button>
+        <button id="solo_mode_location" class="btn btn-sm" onclick="setSoloMode('location')">📍 Clients come to me</button>
+        <span id="solo_buffer_wrap" style="display:inline-flex;align-items:center;gap:6px">
+          <span style="font-size:13px;color:var(--muted)">Travel buffer</span>
+          <select class="form-select" id="solo_buffer" style="width:auto;padding:4px 8px">
+            <option value="0">None</option>
+            <option value="10">10 min</option>
+            <option value="15" selected>15 min</option>
+            <option value="20">20 min</option>
+            <option value="30">30 min</option>
+          </select>
+        </span>
+        <span id="solo_mode_hint" style="font-size:12px;color:var(--muted)"></span>
+      </div>
 
       <div class="grid-2" style="align-items:start">
         <!-- LEFT: Availability + entry -->
@@ -1448,6 +1475,7 @@ async function runPlacement() {
   const prefDay = document.getElementById('p_day').value;
   const prefTime = document.getElementById('p_time').value;
   if (!addr) { alert('Please enter the client address.'); return; }
+  const buffer = parseInt(document.getElementById('p_buffer')?.value || '15', 10);
 
   // Show searching state
   const btn = document.querySelector('#placement_mobile .btn-teal');
@@ -1501,6 +1529,21 @@ async function runPlacement() {
     return haversine(simGeo(addr), simGeo(fromAddr));
   }
 
+  // Drive time in minutes from the new client to an existing address.
+  // Uses real Google Maps minutes when available; otherwise estimates (~2 min/mile).
+  function getDriveMin(toAddr) {
+    if (toAddr) {
+      for (const [dest, val] of Object.entries(distanceMap)) {
+        if (dest.toLowerCase().includes(toAddr.toLowerCase().slice(0,15)) ||
+            toAddr.toLowerCase().includes(dest.toLowerCase().slice(0,15))) {
+          if (val.minutes != null) return Math.round(val.minutes);
+          return Math.round((val.miles||0) * 2);
+        }
+      }
+    }
+    return Math.round(haversine(simGeo(addr), simGeo(toAddr||'')) * 2);
+  }
+
   const TIME_RANGES = {
     'Morning (8am–12pm)': [8,12], 'Afternoon (12pm–4pm)': [12,16],
     'After school (3pm–6pm)': [15,18], 'Evening (6pm–8pm)': [18,20], '': [0,24]
@@ -1513,20 +1556,49 @@ async function runPlacement() {
     const daysToCheck = prefDay ? t.availability.filter(a=>a.day===prefDay) : t.availability;
     if (!daysToCheck.length) return;
 
-    // Build available slot times
+    // Build available slot times, checking drive-time reachability between visits
+    const dur = cfg.apptDuration;
     const slotList = [];
     daysToCheck.forEach(a => {
+      const dayShort = a.day.slice(0,3);
+      // Existing same-day visits as { start, end, address } in minutes
+      const booked = t.students
+        .filter(s => s.day === dayShort && s.time)
+        .map(s => {
+          const sm = parseInt(s.time)*60 + parseInt(s.time.split(':')[1]);
+          return { start: sm, end: sm + dur, address: s.address || '' };
+        })
+        .sort((x,y) => x.start - y.start);
+
       let cur = parseInt(a.from)*60+parseInt(a.from.split(':')[1]);
       const end = parseInt(a.to)*60+parseInt(a.to.split(':')[1]);
-      while (cur+cfg.apptDuration <= end) {
+      while (cur+dur <= end) {
         const hh = Math.floor(cur/60).toString().padStart(2,'0');
         const mm = (cur%60).toString().padStart(2,'0');
-        const occupied = t.students.some(s=>s.day===a.day.slice(0,3)&&s.time===hh+':'+mm);
-        if (!occupied) slotList.push(a.day.slice(0,3)+' '+fmtTime(hh+':'+mm));
-        cur += cfg.apptDuration;
+        const startMin = cur, endMin = cur + dur;
+        const occupied = booked.some(b => b.start === startMin);
+        if (!occupied) {
+          let tight = false, reason = '';
+          const prev = booked.filter(b => b.end <= startMin).sort((x,y)=>y.end-x.end)[0];
+          const next = booked.filter(b => b.start >= endMin).sort((x,y)=>x.start-y.start)[0];
+          if (prev) {
+            const drive = getDriveMin(prev.address);
+            const gap = startMin - prev.end;
+            if (gap < drive + buffer) { tight = true; reason = `~${drive} min drive from prior visit, only ${gap} min before`; }
+          }
+          if (next) {
+            const drive = getDriveMin(next.address);
+            const gap = next.start - endMin;
+            if (gap < drive + buffer) { tight = true; reason = (reason?reason+'; ':'') + `~${drive} min drive to next visit, only ${gap} min after`; }
+          }
+          slotList.push({ label: dayShort+' '+fmtTime(hh+':'+mm), tight, reason });
+        }
+        cur += dur;
       }
     });
     if (!slotList.length) return;
+
+    const reachable = slotList.filter(s => !s.tight);
 
     // Calculate distance from new student to closest existing student
     let closestDist = 999;
@@ -1544,7 +1616,7 @@ async function runPlacement() {
     if (prefTime && slotList.length) {
       const [tStart, tEnd] = TIME_RANGES[prefTime] || [0,24];
       const matches = slotList.filter(s => {
-        const parts = s.split(' ');
+        const parts = s.label.split(' ');
         let h = parseInt(parts[1]); const ap = parts[2];
         if (ap==='PM'&&h!==12) h+=12; if(ap==='AM'&&h===12) h=0;
         return h >= tStart && h < tEnd;
@@ -1552,8 +1624,11 @@ async function runPlacement() {
       if (!matches.length) timePenalty = 20;
     }
 
-    const score = closestDist * 3 + timePenalty;
-    const openSlots = slotList.length;
+    // Push providers with no reachable slots down the ranking
+    const reachPenalty = reachable.length ? 0 : 40;
+
+    const score = closestDist * 3 + timePenalty + reachPenalty;
+    const openSlots = reachable.length;
     results.push({ teacher: t, score, dist: closestDist, openSlots, slotList });
   });
 
@@ -1570,12 +1645,20 @@ async function runPlacement() {
   const hasRealDistances = Object.keys(distanceMap).length > 0;
   el.innerHTML = `<div style="font-size:13px;font-weight:500;color:var(--navy);margin-bottom:10px">
     Best matches for ${name||'new client'} at ${addr}
-    <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:6px">${hasRealDistances ? '📍 Real drive times' : '📍 Estimated distance'}</span>
+    <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:6px">${hasRealDistances ? '📍 Real drive times' : '📍 Estimated distance'} · ${buffer===0?'no':buffer+' min'} travel buffer</span>
   </div>`
     + results.slice(0,5).map((r,i) => {
     const c = AVATAR_COLORS[r.teacher.color%AVATAR_COLORS.length];
     const rankClass = i===0?'result-rank-1':i===1?'result-rank-2':'result-rank-3';
     const distLabel = r.dist < 1 ? (r.dist*5280).toFixed(0)+' ft' : r.dist.toFixed(1)+' mi';
+    const tightCount = r.slotList.filter(s=>s.tight).length;
+    const ordered = [...r.slotList].sort((a,b)=>(a.tight?1:0)-(b.tight?1:0));
+    const slotsHtml = ordered.slice(0,6).map(s=>{
+      const style = s.tight ? 'border-color:#C8861A;background:rgba(200,134,26,0.10);color:#8a5e10' : '';
+      const title = s.tight ? ` title="Tight connection — ${s.reason.replace(/"/g,'&quot;').replace(/'/g,'')}"` : '';
+      const mark = s.tight ? '⚠ ' : '';
+      return `<div class="slot-chip" style="${style}"${title} onclick="selectSlot(this,'${r.teacher.id}','${s.label}','${addr.replace(/'/g,"\\'")}','${(name||'').replace(/'/g,"\\'")}')">${mark}${s.label}</div>`;
+    }).join('') + (ordered.length>6?`<span style="font-size:12px;color:var(--muted);align-self:center">+${ordered.length-6} more</span>`:'');
     return `<div class="result-card">
       <div class="result-rank ${rankClass}"></div>
       <div class="result-inner">
@@ -1589,12 +1672,11 @@ async function runPlacement() {
           </div>
           <div style="text-align:right">
             <div style="font-size:13px;font-weight:500;color:var(--navy)">${distLabel} from route</div>
-            <div style="font-size:11px;color:var(--muted)">${r.openSlots} open slot${r.openSlots!==1?'s':''}</div>
+            <div style="font-size:11px;color:var(--muted)">${r.openSlots} open${tightCount?` · ${tightCount} tight`:''}</div>
           </div>
         </div>
         <div class="result-slots">
-          ${r.slotList.slice(0,6).map(s=>`<div class="slot-chip" onclick="selectSlot(this,'${r.teacher.id}','${s}','${addr.replace(/'/g,"\\'")}','${(name||'').replace(/'/g,"\\'")}')">  ${s}</div>`).join('')}
-          ${r.slotList.length>6?`<span style="font-size:12px;color:var(--muted);align-self:center">+${r.slotList.length-6} more</span>`:''}
+          ${slotsHtml}
         </div>
       </div>
     </div>`;
@@ -2360,12 +2442,31 @@ Location: ${location}`)) {
 
 // ── Solo Operator ─────────────────────────────────────────────────────────────────
 let soloState = {
+  mode: 'mobile',
   availability: [],
   clients: [],
   schedule: []
 };
 
+// Mobile = route-aware (cluster nearby clients to cut driving).
+// Location = clients come to one place, so distance is ignored and slots fill by time.
+function setSoloMode(mode) {
+  soloState.mode = (mode === 'location') ? 'location' : 'mobile';
+  const mob = document.getElementById('solo_mode_mobile');
+  const loc = document.getElementById('solo_mode_location');
+  const hint = document.getElementById('solo_mode_hint');
+  if (mob) mob.className = 'btn btn-sm ' + (soloState.mode==='mobile' ? 'btn-teal' : 'btn-ghost');
+  if (loc) loc.className = 'btn btn-sm ' + (soloState.mode==='location' ? 'btn-teal' : 'btn-ghost');
+  if (hint) hint.textContent = soloState.mode==='location'
+    ? 'Slots fill by day/time — no driving between clients.'
+    : 'Nearby clients are grouped using real drive times to reduce driving.';
+  const bufWrap = document.getElementById('solo_buffer_wrap');
+  if (bufWrap) bufWrap.style.display = soloState.mode==='location' ? 'none' : 'inline-flex';
+  if (soloState.schedule.length) renderSoloSchedule();
+}
+
 function initSoloMode() {
+  setSoloMode(soloState.mode);
   renderSoloAvail();
   renderSoloClientList();
   if (soloState.schedule.length) renderSoloSchedule();
@@ -2538,28 +2639,38 @@ function renderSoloClientList() {
 }
 
 // ── Auto-placement engine ──────────────────────────────────────────────────────
-function runSoloPlacement() {
+async function runSoloPlacement() {
   if (!soloState.availability.length) { alert('Please add your availability first.'); return; }
   if (!soloState.clients.length) { alert('Please add at least one client request.'); return; }
 
-  const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  const DAY_SHORT = {Monday:'Mon',Tuesday:'Tue',Wednesday:'Wed',Thursday:'Thu',Friday:'Fri',Saturday:'Sat',Sunday:'Sun'};
+  const btn = document.querySelector('#view-solo button.btn-teal');
+  const origLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = soloState.mode==='mobile' ? 'Calculating drive times…' : 'Placing…'; }
+
   const TIME_RANGES = {
     'Morning': [8,12], 'Afternoon': [12,16], 'After school': [15,18], 'Evening': [18,20], '': [0,24], 'Any': [0,24]
   };
+  const dur = cfg.apptDuration;
+  const buffer = parseInt(document.getElementById('solo_buffer')?.value || '15', 10);
 
   // Build all open slots from availability
   let openSlots = [];
   soloState.availability.forEach(a => {
     let cur = parseInt(a.from)*60 + parseInt(a.from.split(':')[1]);
     const end = parseInt(a.to)*60 + parseInt(a.to.split(':')[1]);
-    while (cur + cfg.apptDuration <= end) {
+    while (cur + dur <= end) {
       const hh = Math.floor(cur/60).toString().padStart(2,'0');
       const mm = (cur%60).toString().padStart(2,'0');
       openSlots.push({ day: a.day, time: hh+':'+mm, taken: false });
-      cur += cfg.apptDuration;
+      cur += dur;
     }
   });
+
+  // In "I travel" mode, fetch real drive times between client addresses.
+  let driveMin = (a,b) => (!a||!b||a===b) ? 0 : Math.round(haversine(simGeo(a), simGeo(b)) * 2);
+  if (soloState.mode === 'mobile') {
+    driveMin = await soloDriveMatrix(soloState.clients.map(c => c.address));
+  }
 
   // Sort clients: prefer those with specific day+time first
   const sorted = [...soloState.clients].sort((a,b) => {
@@ -2572,43 +2683,109 @@ function runSoloPlacement() {
   const unplaced = [];
 
   sorted.forEach(client => {
-    const geo = simGeo(client.address);
     const [tStart, tEnd] = TIME_RANGES[client.prefTime] || [0,24];
 
-    // Score each open slot
-    const candidates = openSlots.filter(s => {
+    let pool = openSlots.filter(s => {
       if (s.taken) return false;
       if (client.prefDay && s.day !== client.prefDay) return false;
       const h = parseInt(s.time.split(':')[0]);
       if (client.prefTime && (h < tStart || h >= tEnd)) return false;
       return true;
     });
+    let note = '';
 
-    if (!candidates.length) {
+    if (!pool.length) {
       // Try without day preference
-      const fallback = openSlots.filter(s => {
+      pool = openSlots.filter(s => {
         if (s.taken) return false;
         const h = parseInt(s.time.split(':')[0]);
         if (client.prefTime && (h < tStart || h >= tEnd)) return false;
         return true;
       });
-      if (!fallback.length) { unplaced.push(client); return; }
-      // Pick slot nearest to already-placed clients on same day
-      const best = scoredSlot(fallback, placed, geo);
-      best.taken = true;
-      placed.push({ client, slot: best, note: 'Day preference not available' });
-    } else {
-      const best = scoredSlot(candidates, placed, geo);
-      best.taken = true;
-      placed.push({ client, slot: best, note: '' });
-      logRequest({ clientName: client.name, clientAddress: client.address, providerName: 'Solo Operator', slot: best.day.slice(0,3)+' '+fmtTime(best.time), status:'placed' });
+      if (!pool.length) { unplaced.push(client); return; }
+      note = 'Day preference not available';
     }
+
+    let chosen;
+    if (soloState.mode === 'location') {
+      chosen = { slot: earliestSlot(pool), reachable: true };
+    } else {
+      chosen = pickSoloMobileSlot(pool, placed, client, driveMin, buffer, dur);
+    }
+    const best = chosen.slot;
+    best.taken = true;
+    const finalNote = note || (chosen.reachable ? '' : 'tight — travel may not fit');
+    placed.push({ client, slot: best, note: finalNote });
+    logRequest({ clientName: client.name, clientAddress: client.address, providerName: 'Solo Operator', slot: best.day.slice(0,3)+' '+fmtTime(best.time), status:'placed' });
   });
 
   soloState.schedule = placed;
   unplaced.forEach(c => logRequest({ clientName: c.name, clientAddress: c.address, providerName: '—', slot: '—', status:'pending', notes: 'Could not place — no matching slots' }));
   soloState.unplaced = unplaced;
+  if (btn) { btn.disabled = false; btn.textContent = origLabel || '⚡ Auto-place all clients'; }
   renderSoloSchedule();
+}
+
+// Real drive-time matrix between client addresses (minutes). Falls back to
+// estimates when Maps data isn't available or the list is large.
+async function soloDriveMatrix(addresses) {
+  const estimate = (a,b) => (!a||!b||a===b) ? 0 : Math.round(haversine(simGeo(a), simGeo(b)) * 2);
+  const uniq = [...new Set(addresses.filter(Boolean))];
+  if (uniq.length < 2 || uniq.length > 10) return estimate; // Distance Matrix element cap
+  try {
+    const res = await fetch('/api/distance', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origins: uniq, destinations: uniq })
+    });
+    const data = await res.json();
+    if (!data.results) return estimate;
+    const m = {};
+    data.results.forEach((row, i) => {
+      m[uniq[i]] = {};
+      (row.destinations||[]).forEach((d, j) => { m[uniq[i]][uniq[j]] = (d && d.minutes != null) ? d.minutes : null; });
+    });
+    return (a,b) => {
+      if (!a || !b || a===b) return 0;
+      if (m[a] && m[a][b] != null) return Math.round(m[a][b]);
+      return estimate(a,b);
+    };
+  } catch(e) {
+    console.warn('Solo drive times unavailable, using estimates:', e.message);
+    return estimate;
+  }
+}
+
+// Pick the slot that clusters best AND is reachable given drive time + buffer.
+function pickSoloMobileSlot(cands, placed, client, driveMin, buffer, dur) {
+  let best = null;
+  cands.forEach(slot => {
+    const sStart = parseInt(slot.time)*60 + parseInt(slot.time.split(':')[1]);
+    const sEnd = sStart + dur;
+    const sameDay = placed.filter(p => p.slot.day === slot.day).map(p => {
+      const ps = parseInt(p.slot.time)*60 + parseInt(p.slot.time.split(':')[1]);
+      return { start: ps, end: ps + dur, address: p.client.address };
+    });
+    const prev = sameDay.filter(b=>b.end <= sStart).sort((a,b)=>b.end-a.end)[0];
+    const next = sameDay.filter(b=>b.start >= sEnd).sort((a,b)=>a.start-b.start)[0];
+    let reachable = true, drive = 0;
+    if (prev) { const dm = driveMin(prev.address, client.address); drive += dm; if (sStart - prev.end < dm + buffer) reachable = false; }
+    if (next) { const dm = driveMin(client.address, next.address); drive += dm; if (next.start - sEnd < dm + buffer) reachable = false; }
+    if (!prev && !next && sameDay.length) {
+      drive = Math.min(...sameDay.map(b => driveMin(b.address, client.address)));
+    }
+    const score = drive + (reachable ? 0 : 1000);
+    if (!best || score < best.score) best = { slot, reachable, score };
+  });
+  return best || { slot: cands[0], reachable: true };
+}
+
+// Fixed-location pick: earliest matching slot (no distance involved).
+function earliestSlot(slots) {
+  const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  return [...slots].sort((a,b) => {
+    const di = DAYS.indexOf(a.day) - DAYS.indexOf(b.day);
+    return di !== 0 ? di : a.time.localeCompare(b.time);
+  })[0];
 }
 
 function scoredSlot(slots, placed, geo) {
