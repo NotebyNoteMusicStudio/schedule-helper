@@ -456,6 +456,11 @@ body {
     <!-- ── PLACEMENT ── -->
     <div id="view-placement" class="view content">
       <div class="section-label" style="margin-bottom:1.25rem">Schedule a New <span data-cfg="clientSingle">Client</span></div>
+      <div style="display:flex;gap:6px;margin-bottom:1.25rem">
+        <button id="pmode_single" class="solo-tab active" onclick="showPlacementMode('single')">One at a time</button>
+        <button id="pmode_batch" class="solo-tab" onclick="showPlacementMode('batch')">Batch (multiple)</button>
+      </div>
+      <div id="placement_single">
       <div class="grid-2" style="align-items:start">
         <div>
           <div class="card">
@@ -511,6 +516,89 @@ body {
               <div style="font-size:32px;margin-bottom:8px">📍</div>
               Enter a client address and click "Find best provider" to see ranked matches.
             </div>
+          </div>
+        </div>
+      </div>
+      </div><!-- /#placement_single -->
+
+      <!-- ===== BATCH MODE ===== -->
+      <div id="placement_batch" class="hidden">
+        <div class="grid-2" style="align-items:start">
+          <div>
+            <div class="card">
+              <div class="card-title">Add <span data-cfg="clientSingle">client</span>s to schedule</div>
+              <div style="display:flex;gap:6px;margin-bottom:1rem">
+                <button id="btab_form" class="solo-tab active" onclick="showBatchTab('form')">Form</button>
+                <button id="btab_paste" class="solo-tab" onclick="showBatchTab('paste')">Enter Multiple</button>
+                <button id="btab_upload" class="solo-tab" onclick="showBatchTab('upload')">Upload CSV</button>
+              </div>
+
+              <div id="batch_form">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                  <div><label class="form-label">Name</label><input class="form-input" id="bf_name" placeholder="First Last" /></div>
+                  <div><label class="form-label">Address</label><input class="form-input" id="bf_addr" placeholder="123 Main St, City" /></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                  <div><label class="form-label">Pref. day</label>
+                    <select class="form-select" id="bf_day">
+                      <option value="">Any</option>
+                      <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+                      <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+                    </select>
+                  </div>
+                  <div><label class="form-label">Pref. time</label>
+                    <select class="form-select" id="bf_time">
+                      <option value="">Any</option>
+                      <option>Morning</option><option>Afternoon</option><option>After school</option><option>Evening</option>
+                    </select>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                  <div><label class="form-label">Requested <span data-cfg="workerSingle">provider</span></label>
+                    <select class="form-select" id="bf_teacher"><option value="">Any</option></select>
+                  </div>
+                  <div><label class="form-label">Flexibility</label>
+                    <select class="form-select" id="bf_flex">
+                      <option value="">—</option><option value="flexible">Flexible</option>
+                      <option value="somewhat">Somewhat</option><option value="fixed">Fixed</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-group"><label class="form-label">Notes</label><input class="form-input" id="bf_notes" placeholder="e.g. dad works nights, do not move" /></div>
+                <button class="btn btn-ghost btn-sm" onclick="batchAddForm()">+ Add to queue</button>
+              </div>
+
+              <div id="batch_paste" class="hidden">
+                <p class="hint" style="margin-bottom:8px">One per line. Format: <code style="background:var(--cream-dark);padding:1px 5px;border-radius:4px">Name, Address, Day, Time, Notes</code></p>
+                <textarea class="paste-area" id="batch_pasteText" placeholder="Sarah Jones, 123 Oak St Chattanooga TN, Tuesday, After school, dad picks up Fridays&#10;Mike Chen, 456 Pine Ave Chattanooga TN, Monday, Any,&#10;Lisa Park, 789 Elm St, Friday, Morning, flexible"></textarea>
+                <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="batchParsePaste()">Import list</button>
+              </div>
+
+              <div id="batch_upload" class="hidden">
+                <div class="drop-zone" id="batch_dropzone" onclick="document.getElementById('batch_csvInput').click()" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="batchHandleDrop(event)">
+                  <div style="font-size:28px;margin-bottom:8px">📄</div>
+                  <div style="font-weight:500;color:var(--navy)">Drop CSV here or click to browse</div>
+                  <div class="hint" style="margin-top:4px">Columns: Name, Address, Preferred Day, Preferred Time, Notes</div>
+                </div>
+                <input type="file" id="batch_csvInput" accept=".csv" class="hidden" onchange="batchHandleCSV(this)" />
+                <div style="margin-top:10px"><a href="#" onclick="batchDownloadTemplate();return false" style="font-size:12px;color:var(--navy)">↓ Download CSV template</a></div>
+              </div>
+            </div>
+            <p style="font-size:12px;color:var(--muted);margin-top:1rem;line-height:1.5;max-width:760px">Batch placement ranks providers by estimated proximity, then locks each slot as you confirm so two students never land in the same spot. Review and adjust every match before saving.</p>
+          </div>
+
+          <div>
+            <div class="card">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;gap:8px">
+                <div class="card-title" style="margin-bottom:0">Queue (<span id="batch_count">0</span>)</div>
+                <div style="display:flex;gap:6px">
+                  <button class="btn btn-teal btn-sm" onclick="batchPlaceAll()">Place all →</button>
+                  <button class="btn btn-ghost btn-sm" onclick="batchClearAll()">Clear</button>
+                </div>
+              </div>
+              <div id="batch_queueList"><div class="empty" style="padding:1rem">No students queued yet.</div></div>
+            </div>
+            <div id="batch_results" style="margin-top:1.25rem"></div>
           </div>
         </div>
       </div>
@@ -1427,8 +1515,8 @@ function openTeacherDetail(id) {
     <div class="card-title">Availability</div>
     ${t.availability.length?t.availability.map(a=>`<div class="avail-row"><span class="avail-day">${a.day.slice(0,3)}</span><div class="avail-block">${fmtTime(a.from)} – ${fmtTime(a.to)}</div></div>`).join(''):'<p style="font-size:13px;color:var(--muted)">No availability entered yet.</p>'}
     <div class="card-title" style="margin-top:1.25rem">Current Clients (${t.students.length})</div>
-    ${t.students.length?`<table class="schedule-table" style="margin-top:6px"><thead><tr><th>Day</th><th>Time</th><th>Client</th><th>Address</th></tr></thead><tbody>${
-      t.students.map(s=>`<tr><td>${s.day}</td><td>${fmtTime(s.time)}</td><td>${s.name}</td><td style="font-size:12px;color:var(--muted)">${s.address}</td></tr>`).join('')
+    ${t.students.length?`<table class="schedule-table" style="margin-top:6px"><thead><tr><th>Day</th><th>Time</th><th>Client</th><th>Address</th><th>Flex</th><th>Notes</th></tr></thead><tbody>${
+      t.students.map(s=>`<tr><td>${s.day}</td><td>${fmtTime(s.time)}</td><td>${s.name}</td><td style="font-size:12px;color:var(--muted)">${s.address}</td><td>${flexBadge(s.flexibility)}</td><td style="font-size:12px;color:var(--muted)">${s.notes||''}</td></tr>`).join('')
     }</tbody></table>`:'<p style="font-size:13px;color:var(--muted)">No clients entered yet.</p>'}
   `;
   document.getElementById('modal-teacherDetail').classList.remove('hidden');
@@ -1808,6 +1896,425 @@ function quickPlace() {
   document.getElementById('p_addr').value = addr;
   showView('placement');
   setTimeout(async () => await runPlacement(), 100);
+}
+
+// ── Batch placement (multi-provider) ──────────────────────────────────────────
+const batchState = { students: [], proposals: [], unplaceable: [], taken: new Set() };
+
+function flexBadge(f){
+  if(f==='flexible') return '<span style="font-size:11px;color:#2D7A5F;background:rgba(45,122,95,0.12);padding:1px 7px;border-radius:8px">Flexible</span>';
+  if(f==='somewhat') return '<span style="font-size:11px;color:#8a5e10;background:rgba(200,134,26,0.14);padding:1px 7px;border-radius:8px">Somewhat</span>';
+  if(f==='fixed') return '<span style="font-size:11px;color:#9B2C2C;background:rgba(155,44,44,0.10);padding:1px 7px;border-radius:8px">Fixed</span>';
+  return '<span style="font-size:11px;color:var(--muted)">—</span>';
+}
+
+function showPlacementMode(mode){
+  document.getElementById('pmode_single').classList.toggle('active', mode==='single');
+  document.getElementById('pmode_batch').classList.toggle('active', mode==='batch');
+  document.getElementById('placement_single').classList.toggle('hidden', mode!=='single');
+  document.getElementById('placement_batch').classList.toggle('hidden', mode!=='batch');
+  if(mode==='batch') batchPopulateTeachers();
+}
+
+function showBatchTab(tab){
+  ['form','paste','upload'].forEach(t=>{
+    document.getElementById('btab_'+t).classList.toggle('active', t===tab);
+    document.getElementById('batch_'+t).classList.toggle('hidden', t!==tab);
+  });
+}
+
+function batchPopulateTeachers(){
+  const sel = document.getElementById('bf_teacher');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Any</option>' +
+    activeTeachers().map(t=>`<option value="${t.id}">${fullName(t)}</option>`).join('');
+  sel.value = cur;
+}
+
+// ---- input ----
+function batchAddForm(){
+  const name = document.getElementById('bf_name').value.trim();
+  const addr = document.getElementById('bf_addr').value.trim();
+  if(!name || !addr){ alert('Name and address are required.'); return; }
+  batchState.students.push({
+    id: Date.now()+Math.random(),
+    name, address: addr,
+    prefDay: document.getElementById('bf_day').value,
+    prefTime: document.getElementById('bf_time').value,
+    teacherReq: document.getElementById('bf_teacher').value,
+    flexibility: document.getElementById('bf_flex').value,
+    notes: document.getElementById('bf_notes').value.trim()
+  });
+  ['bf_name','bf_addr','bf_notes'].forEach(id=>document.getElementById(id).value='');
+  ['bf_day','bf_time','bf_teacher','bf_flex'].forEach(id=>document.getElementById(id).value='');
+  renderBatchQueue();
+}
+
+function batchParsePaste(){
+  const text = document.getElementById('batch_pasteText').value.trim();
+  if(!text) return;
+  let added = 0;
+  text.split('\n').filter(l=>l.trim()).forEach(line=>{
+    const p = line.split(',').map(x=>x.trim());
+    if(p.length<2 || !p[0]) return;
+    batchState.students.push({
+      id: Date.now()+Math.random(),
+      name: p[0], address: p[1]||'', prefDay: p[2]||'', prefTime: p[3]||'',
+      teacherReq: '', flexibility: '', notes: p[4]||''
+    });
+    added++;
+  });
+  document.getElementById('batch_pasteText').value='';
+  renderBatchQueue();
+  if(added) alert(`${added} student${added!==1?'s':''} added to the queue.`);
+}
+
+function batchHandleDrop(e){
+  e.preventDefault();
+  document.getElementById('batch_dropzone').classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if(f) batchParseCSV(f);
+}
+function batchHandleCSV(input){ if(input.files[0]) batchParseCSV(input.files[0]); }
+
+function batchParseCSV(file){
+  const reader = new FileReader();
+  reader.onload = e=>{
+    const lines = e.target.result.split('\n').filter(l=>l.trim());
+    const start = lines[0] && lines[0].toLowerCase().includes('name') ? 1 : 0;
+    let added = 0;
+    lines.slice(start).forEach(line=>{
+      const p = line.split(',').map(x=>x.trim().replace(/^"|"$/g,''));
+      if(p.length<2 || !p[0]) return;
+      batchState.students.push({
+        id: Date.now()+Math.random(),
+        name: p[0], address: p[1]||'', prefDay: p[2]||'', prefTime: p[3]||'',
+        teacherReq: '', flexibility: '', notes: p[4]||''
+      });
+      added++;
+    });
+    renderBatchQueue();
+    alert(`${added} student${added!==1?'s':''} imported from CSV.`);
+  };
+  reader.readAsText(file);
+}
+
+function batchDownloadTemplate(){
+  const csv = 'Name,Address,Preferred Day,Preferred Time,Notes\nSarah Jones,123 Oak St Chattanooga TN,Tuesday,After school,dad picks up Fridays\nMike Chen,456 Pine Ave Chattanooga TN,Monday,Any,';
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download = 'student-list-template.csv';
+  a.click();
+}
+
+function batchRemoveStudent(id){
+  batchState.students = batchState.students.filter(s=>s.id!==id);
+  renderBatchQueue();
+}
+function batchClearAll(){
+  if(batchState.students.length && !confirm('Clear the whole queue?')) return;
+  batchState.students = [];
+  batchState.proposals = [];
+  batchState.unplaceable = [];
+  renderBatchQueue();
+  renderBatchResults();
+}
+
+function renderBatchQueue(){
+  const countEl = document.getElementById('batch_count');
+  if(countEl) countEl.textContent = batchState.students.length;
+  const el = document.getElementById('batch_queueList');
+  if(!el) return;
+  if(!batchState.students.length){ el.innerHTML = '<div class="empty" style="padding:1rem">No students queued yet.</div>'; return; }
+  el.innerHTML = batchState.students.map(s=>{
+    const meta = [s.prefDay||'Any day', s.prefTime||'Any time'];
+    if(s.teacherReq){ const t=getTeacher(s.teacherReq); if(t) meta.push('wants '+fullName(t)); }
+    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="min-width:0">
+        <div style="font-weight:500;font-size:13px;color:var(--navy)">${s.name} ${flexBadge(s.flexibility)}</div>
+        <div style="font-size:12px;color:var(--muted)">${s.address}</div>
+        <div style="font-size:11px;color:var(--muted)">${meta.join(' · ')}${s.notes?' · 📝 '+s.notes:''}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="batchRemoveStudent(${s.id})">✕</button>
+    </div>`;
+  }).join('');
+}
+
+// ---- matching engine (estimate-based proximity; single-placement flow untouched) ----
+function batchTimeRange(prefTime){
+  const p = (prefTime||'').toLowerCase();
+  if(p.includes('morning')) return [8,12];
+  if(p.includes('after school')||p.includes('after-school')||p.includes('afterschool')) return [15,18];
+  if(p.includes('afternoon')) return [12,16];
+  if(p.includes('evening')) return [18,20];
+  return [0,24];
+}
+
+function batchProviderSlots(t, prefDay, taken){
+  const dur = cfg.apptDuration;
+  const days = prefDay
+    ? t.availability.filter(a=>a.day.slice(0,3).toLowerCase()===prefDay.slice(0,3).toLowerCase())
+    : t.availability;
+  const out = [];
+  days.forEach(a=>{
+    const dayShort = a.day.slice(0,3);
+    const booked = t.students.filter(s=>s.day===dayShort && s.time)
+      .map(s=>parseInt(s.time)*60 + parseInt(s.time.split(':')[1]));
+    let cur = parseInt(a.from)*60 + parseInt(a.from.split(':')[1]);
+    const end = parseInt(a.to)*60 + parseInt(a.to.split(':')[1]);
+    while(cur+dur <= end){
+      const hh = Math.floor(cur/60).toString().padStart(2,'0');
+      const mm = (cur%60).toString().padStart(2,'0');
+      const t24 = hh+':'+mm;
+      const key = t.id+'|'+dayShort+'|'+t24;
+      if(!booked.includes(cur) && !taken.has(key)){
+        out.push({ dayShort, t24, key, hourFloat: cur/60, label: dayShort+' '+fmtTime(t24) });
+      }
+      cur += dur;
+    }
+  });
+  return out;
+}
+
+// Estimated drive minutes (fallback when Google is unavailable): ~2 min/mile.
+function batchEstMin(addr, refAddr){
+  return Math.round(haversine(simGeo(addr), simGeo(refAddr||'')) * 2);
+}
+
+// Caps that keep batch accurate AND within Google's limits / cost.
+const BATCH_MAX = 25;          // students placed per run
+const DEST_PER_PROVIDER = 2;   // representative route points measured per provider
+
+// Up to DEST_PER_PROVIDER representative addresses for a provider's existing route.
+function batchProviderAnchors(t){
+  const addrs = t.students.map(s=>s.address).filter(Boolean);
+  const picks = addrs.slice(0, DEST_PER_PROVIDER);
+  if(!picks.length && t.city) picks.push(t.city);
+  return picks;
+}
+
+// Build a real drive-time matrix (studentIdx|destAddr -> minutes) via Google Distance Matrix.
+// Chunked to <=10x10 (<=100 elements) per request with gentle pacing; per-cell estimate fallback.
+async function batchBuildDriveMatrix(students, destAddrs){
+  const matrix = {};
+  let anyReal = false, anyEst = false;
+  const O = 10, D = 10;
+  for(let oi=0; oi<students.length; oi+=O){
+    const oChunk = students.slice(oi, oi+O);
+    for(let di=0; di<destAddrs.length; di+=D){
+      const dChunk = destAddrs.slice(di, di+D);
+      let row = null;
+      try {
+        const res = await fetch('/api/distance', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ origins: oChunk.map(s=>s.address), destinations: dChunk })
+        });
+        const data = await res.json();
+        if(data.results) row = data.results;
+      } catch(e){ console.warn('Distance chunk failed, estimating:', e.message); }
+      oChunk.forEach((s, li)=>{
+        const si = oi + li;
+        dChunk.forEach((dest, lj)=>{
+          const cell = row && row[li] && row[li].destinations && row[li].destinations[lj];
+          if(cell && cell.minutes!=null){ matrix[si+'|'+dest] = cell.minutes; anyReal = true; }
+          else { matrix[si+'|'+dest] = batchEstMin(s.address, dest); anyEst = true; }
+        });
+      });
+      if(destAddrs.length>D || students.length>O) await new Promise(r=>setTimeout(r, 250));
+    }
+  }
+  return { matrix, anyReal, anyEst };
+}
+
+// Real (or estimated) drive minutes from student index si to a provider's nearest anchor.
+function batchProxMin(si, t, ctx){
+  const anchors = ctx.anchorsByProvider[t.id] || [];
+  let best = Infinity;
+  anchors.forEach(a=>{ const v = ctx.matrix[si+'|'+a]; if(v!=null && v<best) best = v; });
+  if(best===Infinity){ return { mins: batchEstMin(ctx.students[si].address, t.city||''), est: true }; }
+  return { mins: best, est: false };
+}
+
+function batchMatchStudent(stu, si, taken, ctx){
+  let providers = activeTeachers().filter(t=>t.availability.length);
+  if(stu.teacherReq) providers = providers.filter(t=>String(t.id)===String(stu.teacherReq));
+  const [tStart,tEnd] = batchTimeRange(stu.prefTime);
+  const cands = [];
+  providers.forEach(t=>{
+    const slots = batchProviderSlots(t, stu.prefDay, taken);
+    if(!slots.length) return;
+    const { mins, est } = batchProxMin(si, t, ctx);
+    const timeMatched = stu.prefTime ? slots.filter(s=>s.hourFloat>=tStart && s.hourFloat<tEnd) : slots;
+    const useSlots = timeMatched.length ? timeMatched : slots;
+    const timeMiss = !!stu.prefTime && !timeMatched.length;
+    useSlots.forEach(s=>cands.push({
+      teacherId: t.id, teacherName: fullName(t), slot: s, mins, est,
+      score: mins + (timeMiss?30:0), timeMiss
+    }));
+  });
+  cands.sort((a,b)=> a.score-b.score || a.slot.hourFloat-b.slot.hourFloat);
+  return cands;
+}
+
+async function batchPlaceAll(){
+  if(!batchState.students.length){ alert('Add at least one student to the queue first.'); return; }
+
+  let queue = batchState.students;
+  let overflow = 0;
+  if(queue.length > BATCH_MAX){ overflow = queue.length - BATCH_MAX; queue = queue.slice(0, BATCH_MAX); }
+
+  // Provider anchors + unique destination list
+  const anchorsByProvider = {};
+  const destSet = new Set();
+  activeTeachers().forEach(t=>{ const a = batchProviderAnchors(t); anchorsByProvider[t.id] = a; a.forEach(x=>destSet.add(x)); });
+  const destAddrs = [...destSet];
+
+  const resEl = document.getElementById('batch_results');
+  if(resEl) resEl.innerHTML = '<div class="card"><div class="empty" style="padding:1.25rem"><div style="font-size:22px;margin-bottom:6px">🔍</div>Calculating real drive times…</div></div>';
+
+  const { matrix, anyReal, anyEst } = await batchBuildDriveMatrix(queue, destAddrs);
+
+  const studentOriginIdx = {};
+  queue.forEach((s,i)=>studentOriginIdx[s.id]=i);
+  const ctx = { matrix, anchorsByProvider, students: queue, studentOriginIdx, anyReal, anyEst };
+
+  const taken = new Set();
+  activeTeachers().forEach(t=>t.students.forEach(s=>{ if(s.day&&s.time) taken.add(t.id+'|'+s.day+'|'+s.time); }));
+  const proposals = [], unplaceable = [];
+  queue.forEach((stu, si)=>{
+    const cands = batchMatchStudent(stu, si, taken, ctx);
+    if(cands.length){
+      const best = cands[0];
+      taken.add(best.slot.key);
+      proposals.push({ stu, teacherId: best.teacherId, slot: best.slot, timeMiss: best.timeMiss, mins: best.mins });
+    } else {
+      let near=null, nd=Infinity;
+      activeTeachers().forEach(t=>{ const {mins}=batchProxMin(si,t,ctx); if(mins<nd){ nd=mins; near=t; } });
+      unplaceable.push({ stu, nearest: near, mins: (nd===Infinity?null:nd), skipped:false });
+    }
+  });
+  batchState.proposals = proposals;
+  batchState.unplaceable = unplaceable;
+  batchState.taken = taken;
+  batchState.ctx = ctx;
+  renderBatchResults();
+  if(overflow) setTimeout(()=>alert(`Processed the first ${BATCH_MAX}. ${overflow} more still in the queue — confirm these, then run Place all again.`), 100);
+}
+
+function batchAdjust(sel){
+  const [iStr, tid, dayShort, t24] = sel.value.split('@@');
+  const i = +iStr;
+  const p = batchState.proposals[i];
+  if(!p) return;
+  batchState.taken.delete(p.slot.key);
+  const key = tid+'|'+dayShort+'|'+t24;
+  p.teacherId = tid;
+  p.slot = { dayShort, t24, key, label: dayShort+' '+fmtTime(t24), hourFloat: parseInt(t24)+parseInt(t24.split(':')[1])/60 };
+  p.timeMiss = false;
+  batchState.taken.add(key);
+  const si = batchState.ctx ? batchState.ctx.studentOriginIdx[p.stu.id] : null;
+  const t2 = getTeacher(tid);
+  if(si!=null && t2 && batchState.ctx) p.mins = batchProxMin(si, t2, batchState.ctx).mins;
+  renderBatchResults();
+}
+
+function batchSkip(i){
+  const p = batchState.proposals[i];
+  if(!p) return;
+  batchState.taken.delete(p.slot.key);
+  batchState.unplaceable.push({ stu: p.stu, nearest: getTeacher(p.teacherId), mins: p.mins, skipped:true });
+  batchState.proposals.splice(i,1);
+  renderBatchResults();
+}
+
+function renderBatchResults(){
+  const el = document.getElementById('batch_results');
+  if(!el) return;
+  if(!batchState.proposals.length && !batchState.unplaceable.length){ el.innerHTML=''; return; }
+
+  let html = '';
+  const usedEst = batchState.ctx && batchState.ctx.anyEst;
+  const noReal = batchState.ctx && !batchState.ctx.anyReal;
+  if(usedEst){
+    html += `<div style="font-size:12px;border-radius:8px;padding:8px 10px;margin-bottom:10px;${noReal?'background:rgba(200,134,26,0.12);color:#8a5e10':'background:var(--cream-dark);color:var(--muted)'}">${noReal?'⚠ Google Maps was unavailable — all matches below use estimated travel times. Re-run when it\'s back for exact drive times.':'Note: some matches fell back to estimated travel times where Google Maps had no data.'}</div>`;
+  }
+  if(batchState.proposals.length){
+    html += `<div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;gap:8px">
+        <div class="card-title" style="margin-bottom:0">Review assignments (${batchState.proposals.length})</div>
+        <button class="btn btn-teal btn-sm" onclick="batchConfirmAll()">✓ Confirm all & save</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Each match is the closest available provider by real drive time. Use the dropdown to move anyone before saving.</div>`;
+    html += batchState.proposals.map((p,i)=>{
+      const t = getTeacher(p.teacherId);
+      // recompute candidates against current locks, freeing this student's own slot
+      const si = batchState.ctx ? batchState.ctx.studentOriginIdx[p.stu.id] : null;
+      const tExcl = new Set(batchState.taken); tExcl.delete(p.slot.key);
+      const cands = (batchState.ctx && si!=null) ? batchMatchStudent(p.stu, si, tExcl, batchState.ctx).slice(0,12) : [];
+      const opts = cands.map(c=>{
+        const v = `${i}@@${c.teacherId}@@${c.slot.dayShort}@@${c.slot.t24}`;
+        const isCur = String(c.teacherId)===String(p.teacherId) && c.slot.key===p.slot.key;
+        return `<option value="${v}"${isCur?' selected':''}>${c.teacherName} — ${c.slot.label} (~${c.mins} min)${c.timeMiss?' off-pref':''}</option>`;
+      }).join('');
+      const driveLabel = (p.mins!=null) ? `~${p.mins} min drive` : '';
+      return `<div style="padding:9px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="min-width:0">
+            <div style="font-weight:500;font-size:13px;color:var(--navy)">${p.stu.name} ${flexBadge(p.stu.flexibility)}</div>
+            <div style="font-size:12px;color:var(--muted)">${p.stu.address}</div>
+            ${p.stu.notes?`<div style="font-size:11px;color:var(--muted)">📝 ${p.stu.notes}</div>`:''}
+          </div>
+          <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="batchSkip(${i})">Skip</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--navy)">→ ${fullName(t)}, <strong>${p.slot.label}</strong>${driveLabel?` · ${driveLabel}`:''}</span>
+          ${p.timeMiss?'<span style="font-size:11px;color:#8a5e10;background:rgba(200,134,26,0.14);padding:1px 7px;border-radius:8px">outside preferred time</span>':''}
+          <select class="form-select" style="max-width:300px;font-size:12px;padding:4px 8px" onchange="batchAdjust(this)">${opts}</select>
+        </div>
+      </div>`;
+    }).join('') + '</div>';
+  }
+
+  if(batchState.unplaceable.length){
+    html += `<div class="card" style="margin-top:1.25rem;border-color:#C8861A">
+      <div class="card-title">Couldn't place automatically (${batchState.unplaceable.length})</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">No open slot matched their request. These need a human call — often asking a flexible family nearby to shift. Closest provider shown.</div>`;
+    html += batchState.unplaceable.map(u=>{
+      const near = u.nearest ? fullName(u.nearest) : '—';
+      const dist = (u.mins!=null) ? `~${u.mins} min` : '';
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="font-weight:500;font-size:13px;color:var(--navy)">${u.stu.name} ${flexBadge(u.stu.flexibility)}${u.skipped?' <span style="font-size:11px;color:var(--muted)">(skipped)</span>':''}</div>
+        <div style="font-size:12px;color:var(--muted)">${u.stu.address}</div>
+        <div style="font-size:11px;color:var(--muted)">Closest: ${near}${dist?' · '+dist:''}${u.stu.prefDay?' · wanted '+u.stu.prefDay:''}${u.stu.notes?' · 📝 '+u.stu.notes:''}</div>
+      </div>`;
+    }).join('') + '</div>';
+  }
+  el.innerHTML = html;
+}
+
+async function batchConfirmAll(){
+  if(!batchState.proposals.length){ alert('No assignments to confirm.'); return; }
+  if(!confirm(`Assign ${batchState.proposals.length} student(s) to their providers and save to routes?`)) return;
+  const placed = [];
+  for(const p of batchState.proposals){
+    const t = getTeacher(p.teacherId);
+    if(!t) continue;
+    const apt = { day: p.slot.dayShort, time: p.slot.t24, address: p.stu.address, name: p.stu.name, notes: p.stu.notes||'', flexibility: p.stu.flexibility||'' };
+    const saved = await dbSaveAppointment(p.teacherId, apt);
+    if(saved) apt._id = saved.id;
+    t.students.push(apt);
+    logRequest({ clientName: p.stu.name, clientAddress: p.stu.address, providerName: fullName(t), slot: p.slot.label, status:'placed', notes: p.stu.notes||'' });
+    placed.push(p.stu.id);
+  }
+  const n = placed.length;
+  const placedSet = new Set(placed);
+  batchState.students = batchState.students.filter(s=>!placedSet.has(s.id));
+  batchState.proposals = [];
+  renderBatchQueue();
+  renderBatchResults();
+  renderDashboard();
+  alert(`✓ ${n} student${n!==1?'s':''} assigned and saved to provider routes.`);
 }
 
 // ── Master Schedule ───────────────────────────────────────────────────────────
@@ -3589,7 +4096,7 @@ async function loadData() {
       day: a.day, from: a.from_time, to: a.to_time, _id: a.id
     })),
     students: (p.appointments || []).map(s => ({
-      day: s.day, time: s.time, address: s.address || '', name: s.name || '', _id: s.id
+      day: s.day, time: s.time, address: s.address || '', name: s.name || '', notes: s.notes || '', flexibility: s.flexibility || '', _id: s.id
     }))
   }));
 }
@@ -3659,7 +4166,9 @@ async function dbSaveAppointment(providerId, apt) {
     day: apt.day,
     time: apt.time,
     address: apt.address || '',
-    name: apt.name || ''
+    name: apt.name || '',
+    notes: apt.notes || '',
+    flexibility: apt.flexibility || ''
   }).select().single();
   if (error) { console.error('Save appointment error:', error.message); return null; }
   return data;
