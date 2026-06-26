@@ -493,7 +493,7 @@ body {
                 </select>
               </div>
             </div>
-            <div class="form-group">
+            <div class="form-group" data-drive-only>
               <label class="form-label">Travel buffer between visits</label>
               <select class="form-select" id="p_buffer">
                 <option value="0">No buffer (drive time only)</option>
@@ -585,7 +585,7 @@ body {
                 <div style="margin-top:10px"><a href="#" onclick="batchDownloadTemplate();return false" style="font-size:12px;color:var(--navy)">↓ Download CSV template</a></div>
               </div>
             </div>
-            <p style="font-size:12px;color:var(--muted);margin-top:1rem;line-height:1.5;max-width:760px">Batch placement ranks providers by estimated proximity, then locks each slot as you confirm so two students never land in the same spot. Review and adjust every match before saving.</p>
+            <p id="batchIntroNote" style="font-size:12px;color:var(--muted);margin-top:1rem;line-height:1.5;max-width:760px">Batch placement ranks providers by estimated proximity, then locks each slot as you confirm so two students never land in the same spot. Review and adjust every match before saving.</p>
           </div>
 
           <div>
@@ -629,7 +629,7 @@ body {
       </div>
       <p style="font-size:13px;color:var(--muted);margin-bottom:0.75rem">For a single provider managing their own schedule. Set your availability, add client requests and let the system build your week.</p>
 
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1.25rem">
+      <div data-drive-only style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1.25rem">
         <span style="font-size:13px;color:var(--muted)">How do you work?</span>
         <button id="solo_mode_mobile" class="btn btn-sm" onclick="setSoloMode('mobile')">🚗 I travel to clients</button>
         <button id="solo_mode_location" class="btn btn-sm" onclick="setSoloMode('location')">📍 Clients come to me</button>
@@ -744,7 +744,7 @@ body {
           </div>
         </div>
       </div>
-      <p style="font-size:12px;color:var(--muted);margin-top:1.25rem;line-height:1.5;max-width:760px">Limit: Supports up to 10 addresses at a time using real Google Maps drive times. For larger schedules, or if Google Maps is temporarily unavailable, the system automatically switches to estimated travel times so scheduling continues without interruption.</p>
+      <p data-drive-only style="font-size:12px;color:var(--muted);margin-top:1.25rem;line-height:1.5;max-width:760px">Limit: Supports up to 10 addresses at a time using real Google Maps drive times. For larger schedules, or if Google Maps is temporarily unavailable, the system automatically switches to estimated travel times so scheduling continues without interruption.</p>
     </div>
 
 
@@ -1682,11 +1682,12 @@ async function runPlacement() {
   const prefTime = document.getElementById('p_time').value;
   if (!addr) { alert('Please enter the client address.'); return; }
   const buffer = parseInt(document.getElementById('p_buffer')?.value || '15', 10);
+  const loc = cfg.bizType === 'location'; // clients come to provider — no drive time at all
 
   // Show searching state
   const btn = document.getElementById('findBestBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Finding...'; }
-  document.getElementById('placementResults').innerHTML = '<div class="empty" style="border:1px dashed var(--border);border-radius:10px"><div style="font-size:24px;margin-bottom:8px">🔍</div>Calculating drive times...</div>';
+  document.getElementById('placementResults').innerHTML = `<div class="empty" style="border:1px dashed var(--border);border-radius:10px"><div style="font-size:24px;margin-bottom:8px">🔍</div>${loc ? 'Finding the best match…' : 'Calculating drive times...'}</div>`;
 
   logRequest({ clientName: name||'Unknown', clientAddress: addr, providerName: '—', slot: '—', status:'pending', notes: 'Search run — awaiting assignment' });
 
@@ -1703,7 +1704,7 @@ async function runPlacement() {
   try {
     const origins = [addr]; // new student address
     const destinations = [...allAddresses].filter(a => a !== addr);
-    if (destinations.length > 0) {
+    if (!loc && destinations.length > 0) {
       const res = await fetch('/api/distance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1787,12 +1788,12 @@ async function runPlacement() {
           let tight = false, reason = '';
           const prev = booked.filter(b => b.end <= startMin).sort((x,y)=>y.end-x.end)[0];
           const next = booked.filter(b => b.start >= endMin).sort((x,y)=>x.start-y.start)[0];
-          if (prev) {
+          if (!loc && prev) {
             const drive = getDriveMin(prev.address);
             const gap = startMin - prev.end;
             if (gap < drive + buffer) { tight = true; reason = `~${drive} min drive from prior visit, only ${gap} min before`; }
           }
-          if (next) {
+          if (!loc && next) {
             const drive = getDriveMin(next.address);
             const gap = next.start - endMin;
             if (gap < drive + buffer) { tight = true; reason = (reason?reason+'; ':'') + `~${drive} min drive to next visit, only ${gap} min after`; }
@@ -1806,9 +1807,11 @@ async function runPlacement() {
 
     const reachable = slotList.filter(s => !s.tight);
 
-    // Calculate distance from new student to closest existing student
+    // Calculate distance from new student to closest existing student (skipped in location mode)
     let closestDist = 999;
-    if (t.students.length > 0) {
+    if (loc) {
+      closestDist = 0; // no travel — rank by availability + time preference only
+    } else if (t.students.length > 0) {
       t.students.forEach(s => {
         const d = getDist(s.address);
         if (d < closestDist) closestDist = d;
@@ -1852,7 +1855,7 @@ async function runPlacement() {
   const hasRealDistances = Object.keys(distanceMap).length > 0;
   el.innerHTML = `<div style="font-size:13px;font-weight:500;color:var(--navy);margin-bottom:10px">
     Best matches for ${name||'new client'} at ${addr}
-    <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:6px">${hasRealDistances ? '📍 Real drive times' : '📍 Estimated distance'} · ${buffer===0?'no':buffer+' min'} travel buffer</span>
+    ${loc ? '' : `<span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:6px">${hasRealDistances ? '📍 Real drive times' : '📍 Estimated distance'} · ${buffer===0?'no':buffer+' min'} travel buffer</span>`}
   </div>`
     + results.slice(0,5).map((r,i) => {
     const c = AVATAR_COLORS[r.teacher.color%AVATAR_COLORS.length];
@@ -1878,7 +1881,7 @@ async function runPlacement() {
             </div>
           </div>
           <div style="text-align:right">
-            <div style="font-size:13px;font-weight:500;color:var(--navy)">${distLabel} from route</div>
+            ${loc ? '' : `<div style="font-size:13px;font-weight:500;color:var(--navy)">${distLabel} from route</div>`}
             <div style="font-size:11px;color:var(--muted)">${r.openSlots} open${tightCount?` · ${tightCount} tight`:''}</div>
           </div>
         </div>
@@ -2194,6 +2197,7 @@ function batchProviderAnchors(t){
 async function batchBuildDriveMatrix(students, destAddrs){
   const matrix = {};
   let anyReal = false, anyEst = false;
+  if(cfg.bizType === 'location') return { matrix, anyReal, anyEst }; // no driving — skip Google Maps
   const O = 10, D = 10;
   for(let oi=0; oi<students.length; oi+=O){
     const oChunk = students.slice(oi, oi+O);
@@ -2224,6 +2228,7 @@ async function batchBuildDriveMatrix(students, destAddrs){
 
 // Real (or estimated) drive minutes from student index si to a provider's nearest anchor.
 function batchProxMin(si, t, ctx){
+  if(cfg.bizType === 'location') return { mins: 0, est: false }; // clients come to provider — no drive time
   const anchors = ctx.anchorsByProvider[t.id] || [];
   let best = Infinity;
   anchors.forEach(a=>{ const v = ctx.matrix[si+'|'+a]; if(v!=null && v<best) best = v; });
@@ -2259,7 +2264,7 @@ function clusterPenalty(t, slot, si, ctx, placed){
     let best = Infinity;
     nbrs.forEach(n=>{
       const gap = Math.abs(slot.slotMin - n.min);
-      const geo = batchEstMin(ctx.students[si].address, n.address);
+      const geo = (cfg.bizType === 'location') ? 0 : batchEstMin(ctx.students[si].address, n.address);
       const v = gap + 0.5*geo;
       if(v<best) best = v;
     });
@@ -2385,7 +2390,7 @@ async function batchPlaceAll(){
   const destAddrs = [...destSet];
 
   const resEl = document.getElementById('batch_results');
-  if(resEl) resEl.innerHTML = '<div class="card"><div class="empty" style="padding:1.25rem"><div style="font-size:22px;margin-bottom:6px">🔍</div>Calculating real drive times…</div></div>';
+  if(resEl) resEl.innerHTML = `<div class="card"><div class="empty" style="padding:1.25rem"><div style="font-size:22px;margin-bottom:6px">🔍</div>${cfg.bizType==='location' ? 'Finding the best fit…' : 'Calculating real drive times…'}</div></div>`;
 
   const { matrix, anyReal, anyEst } = await batchBuildDriveMatrix(queue, destAddrs);
 
@@ -2535,7 +2540,7 @@ function renderBatchResults(){
           <button class="btn btn-teal btn-sm" onclick="batchConfirmAll()">✓ Confirm all &amp; save</button>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Requested times come first; flexible students are clustered next to the provider's nearby visits to keep the day tight. <strong>Set</strong> a row to lock it (turns green), then <strong>Reshuffle unset</strong> to redo everyone else around your locked picks.</div>`;
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${cfg.bizType==='location' ? "Requested times come first; everyone else fills the open slots near each provider's usual hours." : "Requested times come first; flexible students are clustered next to the provider's nearby visits to keep the day tight."} <strong>Set</strong> a row to lock it (turns green), then <strong>Reshuffle unset</strong> to redo everyone else around your locked picks.</div>`;
     html += batchState.proposals.map((p,i)=>{
       const t = getTeacher(p.teacherId);
       const R = p.R || resolveStudent(p.stu);
@@ -2548,7 +2553,7 @@ function renderBatchResults(){
         const isCur = String(c.teacherId)===String(p.teacherId) && c.slot.key===p.slot.key;
         return `<option value="${v}"${isCur?' selected':''}>${c.teacherName} — ${c.slot.label} (~${c.mins} min)${c.off?' · off-pref':''}${c.tight?' · tight':''}</option>`;
       }).join('');
-      const driveLabel = (p.mins!=null) ? `~${p.mins} min drive` : '';
+      const driveLabel = (cfg.bizType!=='location' && p.mins!=null) ? `~${p.mins} min drive` : '';
       const tch = R.teacherReq ? (getTeacher(R.teacherReq)?' · wants '+fullName(getTeacher(R.teacherReq)):'') : '';
       const provOpts = activeTeachers().map(pt=>`<option value="${pt.id}"${String(pt.id)===String(p.teacherId)?' selected':''}>${fullName(pt)}</option>`).join('');
       const dayOpts = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<option value="${d}"${d===p.slot.dayShort?' selected':''}>${d}</option>`).join('');
@@ -3099,6 +3104,14 @@ function initSettingsView() {
   // Show/hide location address field
   const laField = document.getElementById('locationAddressField');
   if (laField) laField.style.display = cfg.bizType === 'location' ? 'block' : 'none';
+  // Hide all drive-time-only UI when clients come to the provider (no travel between visits)
+  const isLoc = cfg.bizType === 'location';
+  document.querySelectorAll('[data-drive-only]').forEach(elm => { elm.style.display = isLoc ? 'none' : ''; });
+  if (isLoc && typeof setSoloMode === 'function') setSoloMode('location'); // no travel option in a location business
+  const bin = document.getElementById('batchIntroNote');
+  if (bin) bin.textContent = isLoc
+    ? 'Batch placement matches each student to the best open time, then locks each slot as you confirm so two students never land in the same spot. Review and adjust every match before saving.'
+    : 'Batch placement ranks providers by estimated proximity, then locks each slot as you confirm so two students never land in the same spot. Review and adjust every match before saving.';
   // Set biz type cards
   const btm = document.getElementById('bt_mobile');
   const btl = document.getElementById('bt_location');
