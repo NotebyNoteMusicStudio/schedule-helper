@@ -2211,23 +2211,124 @@ function batchProxMin(si, t, ctx){
   return { mins: best, est: false };
 }
 
-function batchMatchStudent(stu, si, taken, ctx){
+// Build a picture of who's already on each provider's day (existing + this batch),
+// so flexible students can be clustered next to nearby visits instead of scattered.
+function buildPlaced(proposals, excludeId){
+  const byDay = {}, byProv = {};
+  activeTeachers().forEach(t=>{
+    t.students.forEach(s=>{
+      if(!s.time) return;
+      const m = parseInt(s.time)*60 + parseInt(s.time.split(':')[1]);
+      (byDay[t.id+'|'+s.day] = byDay[t.id+'|'+s.day]||[]).push({ min:m, address:s.address||'' });
+      (byProv[t.id] = byProv[t.id]||[]).push(m);
+    });
+  });
+  (proposals||[]).forEach(p=>{
+    if(excludeId!=null && p.stu.id===excludeId) return;
+    (byDay[p.teacherId+'|'+p.slot.dayShort] = byDay[p.teacherId+'|'+p.slot.dayShort]||[]).push({ min:p.slot.slotMin, address:p.stu.address||'' });
+    (byProv[p.teacherId] = byProv[p.teacherId]||[]).push(p.slot.slotMin);
+  });
+  return { byDay, byProv };
+}
+
+// Lower = better clustering. Prefers slots next in time to a geographically-near visit,
+// then filling an existing day near the provider's typical hours, over opening a fresh day.
+function clusterPenalty(t, slot, si, ctx, placed){
+  const nbrs = placed.byDay[t.id+'|'+slot.dayShort] || [];
+  if(nbrs.length){
+    let best = Infinity;
+    nbrs.forEach(n=>{
+      const gap = Math.abs(slot.slotMin - n.min);
+      const geo = batchEstMin(ctx.students[si].address, n.address);
+      const v = gap + 0.5*geo;
+      if(v<best) best = v;
+    });
+    return best;
+  }
+  const pm = placed.byProv[t.id] || [];
+  if(pm.length){ const typ = pm.reduce((a,b)=>a+b,0)/pm.length; return 600 + Math.abs(slot.slotMin - typ); }
+  return 1200;
+}
+
+// Buffer for getting in/out of the car between in-home visits.
+const CAR_BUFFER = 2;
+
+// Mobile only: is this slot too close to an adjacent visit to actually drive there in time?
+// Required gap to a neighbor = estimated drive minutes + CAR_BUFFER (0 when effectively co-located).
+function batchSlotTight(t, slot, si, ctx, placed, dur){
+  if(cfg.bizType === 'location') return false; // clients come to the provider — no driving between visits
+  const nbrs = placed.byDay[t.id+'|'+slot.dayShort] || [];
+  if(!nbrs.length) return false;
+  for(const n of nbrs){ if(Math.abs(slot.slotMin - n.min) < dur) return true; } // overlap
+  let pred=null, succ=null;
+  nbrs.forEach(n=>{
+    if(n.min + dur <= slot.slotMin){ if(!pred || n.min>pred.min) pred = n; }
+    if(n.min >= slot.slotMin + dur){ if(!succ || n.min<succ.min) succ = n; }
+  });
+  const myAddr = ctx.students[si].address;
+  if(pred){ const drive = batchEstMin(myAddr, pred.address); const need = drive>0 ? drive+CAR_BUFFER : 0; if((slot.slotMin - (pred.min+dur)) < need) return true; }
+  if(succ){ const drive = batchEstMin(myAddr, succ.address); const need = drive>0 ? drive+CAR_BUFFER : 0; if((succ.min - (slot.slotMin+dur)) < need) return true; }
+  return false;
+}
+
+// Minute-level candidate start times for a provider — packs tightly instead of using a fixed grid.
+// Candidates: the student's exact requested time, each window start, and the exact minute right
+// after / before every existing visit (visit edge + drive + buffer). No wasted half-hour blocks.
+function batchCandidateSlots(t, taken, R, newAddr, placed, dur){
+  const loc = cfg.bizType === 'location';
+  const gapTo = addrA => loc ? 0 : (()=>{ const d = batchEstMin(newAddr, addrA); return d>0 ? d+CAR_BUFFER : 0; })();
+  const out = [];
+  t.availability.forEach(a=>{
+    const dayShort = a.day.slice(0,3);
+    if(R.days.length && !R.days.includes(dayShort)) return;
+    const winStart = parseInt(a.from)*60 + parseInt(a.from.split(':')[1]);
+    const winEnd   = parseInt(a.to)*60 + parseInt(a.to.split(':')[1]);
+    const appts = (placed.byDay[t.id+'|'+dayShort]||[]).slice().sort((x,y)=>x.min-y.min);
+    const cand = new Set();
+    cand.add(winStart);
+    if(R.exactMin!=null) cand.add(R.exactMin);
+    if(R.bucket) cand.add(Math.max(winStart, Math.round(R.bucket[0]*60)));
+    appts.forEach(ap=>{
+      cand.add(ap.min + dur + gapTo(ap.address));            // pack right after this visit
+      cand.add(ap.min - gapTo(ap.address) - dur);            // pack right before this visit
+    });
+    if(!appts.length && R.exactMin==null && !R.bucket){
+      const pm = placed.byProv[t.id] || [];
+      if(pm.length){ const typ = Math.round(pm.reduce((a,b)=>a+b,0)/pm.length); cand.add(typ); } // seed near typical hours, not earliest
+    }
+    cand.forEach(cm0=>{
+      const cm = Math.round(cm0);
+      if(cm < winStart || cm+dur > winEnd) return;
+      for(const ap of appts){ if(cm < ap.min+dur && ap.min < cm+dur) return; } // no overlap
+      const t24 = String(Math.floor(cm/60)).padStart(2,'0')+':'+String(cm%60).padStart(2,'0');
+      const key = t.id+'|'+dayShort+'|'+t24;
+      if(taken.has(key)) return;
+      out.push({ dayShort, t24, key, slotMin: cm, hourFloat: cm/60, label: dayShort+' '+fmtTime(t24) });
+    });
+  });
+  return out;
+}
+
+function batchMatchStudent(stu, si, taken, ctx, placed){
+  placed = placed || buildPlaced(batchState.proposals, stu.id);
   const R = resolveStudent(stu);
+  const dur = cfg.apptDuration;
   let providers = activeTeachers().filter(t=>t.availability.length);
   if(R.teacherReq) providers = providers.filter(t=>String(t.id)===String(R.teacherReq));
   const cands = [];
   providers.forEach(t=>{
-    let slots = batchAllSlots(t, taken);
-    if(R.days.length) slots = slots.filter(s=>R.days.includes(s.dayShort));
+    const slots = batchCandidateSlots(t, taken, R, stu.address, placed, dur);
     if(!slots.length) return;
     const { mins } = batchProxMin(si, t, ctx);
     slots.forEach(s=>{
       const timeFit = slotTimeFit(R, s);
-      cands.push({ teacherId: t.id, teacherName: fullName(t), slot: s, mins, timeFit, off: timeFit>0 });
+      const cluster = clusterPenalty(t, s, si, ctx, placed);
+      const tight = batchSlotTight(t, s, si, ctx, placed, dur);
+      cands.push({ teacherId: t.id, teacherName: fullName(t), slot: s, mins, timeFit, cluster, tight, off: timeFit>0 });
     });
   });
-  // STUDENT PREFERENCE FIRST (timeFit), THEN nearest teacher, then earliest slot
-  cands.sort((a,b)=> a.timeFit-b.timeFit || a.mins-b.mins || a.slot.slotMin-b.slot.slotMin);
+  // requested time FIRST, then a drivable (non-tight) slot, then clustered, then nearest, then earliest
+  cands.sort((a,b)=> a.timeFit-b.timeFit || (a.tight?1:0)-(b.tight?1:0) || a.cluster-b.cluster || a.mins-b.mins || a.slot.slotMin-b.slot.slotMin);
   return cands;
 }
 
@@ -2255,26 +2356,38 @@ async function batchPlaceAll(){
 
   const taken = new Set();
   activeTeachers().forEach(t=>t.students.forEach(s=>{ if(s.day&&s.time) taken.add(t.id+'|'+s.day+'|'+s.time); }));
+
+  // Place the most-constrained students first (exact time, then time window) so they
+  // anchor each provider's day; flexible/any-time students then cluster around them.
+  const rank = R => (R.exactMin!=null ? 0 : (R.bucket ? 1 : 2));
+  const origIndex = {}; queue.forEach((s,i)=>origIndex[s.id]=i);
+  const ordered = queue.map(stu=>({ stu, si: studentOriginIdx[stu.id], R: resolveStudent(stu) }));
+  ordered.sort((a,b)=> rank(a.R)-rank(b.R) || origIndex[a.stu.id]-origIndex[b.stu.id]);
+
+  const placed = buildPlaced([], null); // start from existing routes only
   const proposals = [], unplaceable = [];
-  queue.forEach((stu, si)=>{
-    const R = resolveStudent(stu);
-    const cands = batchMatchStudent(stu, si, taken, ctx);
+  ordered.forEach(({stu, si, R})=>{
+    const cands = batchMatchStudent(stu, si, taken, ctx, placed);
     if(cands.length){
       const best = cands[0];
       const hardWanted = (R.exactMin!=null) || (R.bucket!=null);
-      // Don't force a Not-Flexible student into a time they didn't ask for.
       if(best.off && R.flexibility==='fixed' && hardWanted){
-        unplaceable.push({ stu, R, nearest: getTeacher(best.teacherId), mins: best.mins, reason:'fixed-miss' });
+        unplaceable.push({ stu, R, nearest: getTeacher(best.teacherId), mins: best.mins, reason:'fixed-miss', _i: origIndex[stu.id] });
       } else {
         taken.add(best.slot.key);
-        proposals.push({ stu, R, teacherId: best.teacherId, slot: best.slot, mins: best.mins, off: best.off });
+        proposals.push({ stu, R, teacherId: best.teacherId, slot: best.slot, mins: best.mins, off: best.off, tight: best.tight, _i: origIndex[stu.id] });
+        // fold into the clustering picture so the next student packs against it
+        (placed.byDay[best.teacherId+'|'+best.slot.dayShort] = placed.byDay[best.teacherId+'|'+best.slot.dayShort]||[]).push({ min: best.slot.slotMin, address: stu.address||'' });
+        (placed.byProv[best.teacherId] = placed.byProv[best.teacherId]||[]).push(best.slot.slotMin);
       }
     } else {
       let near=null, nd=Infinity;
       activeTeachers().forEach(t=>{ const {mins}=batchProxMin(si,t,ctx); if(mins<nd){ nd=mins; near=t; } });
-      unplaceable.push({ stu, R, nearest: near, mins: (nd===Infinity?null:nd), reason:'no-slot' });
+      unplaceable.push({ stu, R, nearest: near, mins: (nd===Infinity?null:nd), reason:'no-slot', _i: origIndex[stu.id] });
     }
   });
+  proposals.sort((a,b)=>a._i-b._i);
+  unplaceable.sort((a,b)=>a._i-b._i);
   batchState.proposals = proposals;
   batchState.unplaceable = unplaceable;
   batchState.taken = taken;
@@ -2297,7 +2410,40 @@ function batchAdjust(sel){
   batchState.taken.add(key);
   const si = batchState.ctx ? batchState.ctx.studentOriginIdx[p.stu.id] : null;
   const t2 = getTeacher(tid);
-  if(si!=null && t2 && batchState.ctx) p.mins = batchProxMin(si, t2, batchState.ctx).mins;
+  if(si!=null && t2 && batchState.ctx){
+    p.mins = batchProxMin(si, t2, batchState.ctx).mins;
+    const placed = buildPlaced(batchState.proposals, p.stu.id);
+    p.tight = batchSlotTight(t2, p.slot, si, batchState.ctx, placed, cfg.apptDuration);
+  }
+  renderBatchResults();
+}
+
+function batchManualSet(i){
+  const p = batchState.proposals[i];
+  if(!p) return;
+  const pid = document.getElementById('bm_prov_'+i).value;
+  const day = document.getElementById('bm_day_'+i).value;
+  const tm  = document.getElementById('bm_time_'+i).value; // "HH:MM"
+  const t = getTeacher(pid);
+  if(!t){ alert('Pick a provider.'); return; }
+  if(!tm){ alert('Enter a time.'); return; }
+  const slotMin = parseInt(tm)*60 + parseInt(tm.split(':')[1]);
+  const key = pid+'|'+day+'|'+tm;
+  // warn (but allow) if it collides with a visit already on that provider's day
+  const placed = buildPlaced(batchState.proposals, p.stu.id);
+  const clash = (placed.byDay[pid+'|'+day]||[]).some(n=>Math.abs(n.min-slotMin) < cfg.apptDuration);
+  if(clash && !confirm('That overlaps another visit on this day. Set it anyway?')) return;
+  batchState.taken.delete(p.slot.key);
+  p.teacherId = pid;
+  p.slot = { dayShort: day, t24: tm, key, slotMin, hourFloat: slotMin/60, label: day+' '+fmtTime(tm) };
+  batchState.taken.add(key);
+  const si = batchState.ctx ? batchState.ctx.studentOriginIdx[p.stu.id] : null;
+  if(si!=null && batchState.ctx){
+    p.mins = batchProxMin(si, t, batchState.ctx).mins;
+    p.tight = batchSlotTight(t, p.slot, si, batchState.ctx, buildPlaced(batchState.proposals, p.stu.id), cfg.apptDuration);
+  }
+  p.off = slotTimeFit(resolveStudent(p.stu), p.slot) > 0;
+  p.manual = true;
   renderBatchResults();
 }
 
@@ -2327,7 +2473,7 @@ function renderBatchResults(){
         <div class="card-title" style="margin-bottom:0">Review assignments (${batchState.proposals.length})</div>
         <button class="btn btn-teal btn-sm" onclick="batchConfirmAll()">✓ Confirm all & save</button>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Matched to each student's requested day &amp; time first, then the nearest provider. Use the dropdown to move anyone before saving.</div>`;
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Requested times come first; flexible students are clustered next to the provider's nearby visits to keep the day tight. Use the dropdown to move anyone before saving.</div>`;
     html += batchState.proposals.map((p,i)=>{
       const t = getTeacher(p.teacherId);
       const R = p.R || resolveStudent(p.stu);
@@ -2338,14 +2484,16 @@ function renderBatchResults(){
       const opts = cands.map(c=>{
         const v = `${i}@@${c.teacherId}@@${c.slot.dayShort}@@${c.slot.t24}`;
         const isCur = String(c.teacherId)===String(p.teacherId) && c.slot.key===p.slot.key;
-        return `<option value="${v}"${isCur?' selected':''}>${c.teacherName} — ${c.slot.label} (~${c.mins} min)${c.off?' · off-pref':''}</option>`;
+        return `<option value="${v}"${isCur?' selected':''}>${c.teacherName} — ${c.slot.label} (~${c.mins} min)${c.off?' · off-pref':''}${c.tight?' · tight':''}</option>`;
       }).join('');
       const driveLabel = (p.mins!=null) ? `~${p.mins} min drive` : '';
       const tch = R.teacherReq ? (getTeacher(R.teacherReq)?' · wants '+fullName(getTeacher(R.teacherReq)):'') : '';
+      const provOpts = activeTeachers().map(pt=>`<option value="${pt.id}"${String(pt.id)===String(p.teacherId)?' selected':''}>${fullName(pt)}</option>`).join('');
+      const dayOpts = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<option value="${d}"${d===p.slot.dayShort?' selected':''}>${d}</option>`).join('');
       return `<div style="padding:9px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
           <div style="min-width:0">
-            <div style="font-weight:500;font-size:13px;color:var(--navy)">${p.stu.name} ${flexBadge(R.flexibility)}</div>
+            <div style="font-weight:500;font-size:13px;color:var(--navy)">${p.stu.name} ${flexBadge(R.flexibility)}${p.manual?' <span style="font-size:11px;color:var(--teal-dark)">✓ manual</span>':''}</div>
             <div style="font-size:12px;color:var(--muted)">${p.stu.address}</div>
             <div style="font-size:11px;color:var(--muted)">Requested: ${prefDesc(R)}${tch}${R.notes?' · 📝 '+R.notes:''}</div>
           </div>
@@ -2354,7 +2502,15 @@ function renderBatchResults(){
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
           <span style="font-size:12px;color:var(--navy)">→ ${fullName(t)}, <strong>${p.slot.label}</strong>${driveLabel?` · ${driveLabel}`:''}</span>
           ${p.off?'<span style="font-size:11px;color:#8a5e10;background:rgba(200,134,26,0.14);padding:1px 7px;border-radius:8px">not their requested time</span>':''}
+          ${p.tight?'<span style="font-size:11px;color:#9B2C2C;background:rgba(155,44,44,0.10);padding:1px 7px;border-radius:8px">tight drive — check travel time</span>':''}
           <select class="form-select" style="max-width:320px;font-size:12px;padding:4px 8px" onchange="batchAdjust(this)">${opts}</select>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--muted)">Set manually:</span>
+          <select id="bm_prov_${i}" class="form-select" style="font-size:12px;padding:3px 6px;width:auto">${provOpts}</select>
+          <select id="bm_day_${i}" class="form-select" style="font-size:12px;padding:3px 6px;width:auto">${dayOpts}</select>
+          <input id="bm_time_${i}" type="time" class="form-input" style="font-size:12px;padding:3px 6px;width:130px" value="${p.slot.t24}" />
+          <button class="btn btn-ghost btn-sm" onclick="batchManualSet(${i})">Set</button>
         </div>
       </div>`;
     }).join('') + '</div>';
