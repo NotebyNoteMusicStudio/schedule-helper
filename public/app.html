@@ -570,8 +570,8 @@ body {
               </div>
 
               <div id="batch_paste" class="hidden">
-                <p class="hint" style="margin-bottom:8px">One per line: <code style="background:var(--cream-dark);padding:1px 5px;border-radius:4px">Name, Address, Day &amp; time, Flexibility, Notes</code>. Day/time can be natural — "Tue 4pm", "Mon or Wed after school", "Tuesday 4:30". Flexibility reads "not flexible" / "somewhat" / "flexible". Naming a provider ("wants Gloria") routes to them.</p>
-                <textarea class="paste-area" id="batch_pasteText" placeholder="Ira Sai, 1070 Stanford Ln Prosper, Tue 4pm, Not flexible, Really wants that spot&#10;Nyra Kusuma, 1070 Columbus Ln Prosper, Tue or Wed, Flexible, fine during summer&#10;Rana Gouthami, 4510 Mayfield Dr Prosper, any time, Flexible, wants Gloria"></textarea>
+                <p class="hint" style="margin-bottom:8px">One per line: <code style="background:var(--cream-dark);padding:1px 5px;border-radius:4px">Name, Address, Day &amp; time, Flexibility, Notes</code>. Day/time can be natural — "Tue 4pm", "Mon or Wed after school", "Tuesday 4:30". Flexibility reads "not flexible" / "somewhat" / "flexible". Naming a provider ("wants Sarah") routes to them.</p>
+                <textarea class="paste-area" id="batch_pasteText" placeholder="Sarah Jones, 123 Oak St Seattle WA, Tue 4pm, Not flexible, Really wants that spot&#10;Mike Chen, 456 Pine Ave Seattle WA, Tue or Wed, Flexible, fine during summer&#10;Lisa Park, 789 Elm St Seattle WA, any time, Flexible, wants Sarah"></textarea>
                 <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="batchParsePaste()">Import list</button>
               </div>
 
@@ -2025,7 +2025,7 @@ function batchParseCSV(file){
 }
 
 function batchDownloadTemplate(){
-  const csv = 'Name,Address,Day & time,Flexibility,Notes\nIra Sai,1070 Stanford Ln Prosper TX,Tue 4pm,Not flexible,Really wants that spot\nNyra Kusuma,1070 Columbus Ln Prosper TX,Tue or Wed,Flexible,fine during summer';
+  const csv = 'Name,Address,Day & time,Flexibility,Notes\nSarah Jones,123 Oak St Seattle WA,Tue 4pm,Not flexible,Really wants that spot\nMike Chen,456 Pine Ave Seattle WA,Tue or Wed,Flexible,fine during summer';
   const a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download = 'student-list-template.csv';
