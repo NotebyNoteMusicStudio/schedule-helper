@@ -3060,6 +3060,10 @@ function setBizType(type) {
   // show/hide location address field
   const laField = document.getElementById('locationAddressField');
   if (laField) laField.style.display = type==='location' ? 'block' : 'none';
+  // apply drive-time visibility + Solo mode immediately (no reload needed)
+  const isLoc = type === 'location';
+  document.querySelectorAll('[data-drive-only]').forEach(elm => { elm.style.display = isLoc ? 'none' : ''; });
+  if (typeof soloState !== 'undefined') soloState.mode = isLoc ? 'location' : 'mobile';
   applyPlacementView();
 }
 function setApptLabel(val) {
