@@ -1090,6 +1090,26 @@ body {
 </div>
 
 <!-- ═══════════════════════════════ MODALS ═══════════════════════════════ -->
+<div id="modal-moveAppt" class="modal-bg hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-title">Move appointment</div>
+    <div id="ma_who" style="font-size:13px;color:var(--muted);margin-bottom:14px"></div>
+    <label class="form-label">Provider</label>
+    <select id="ma_prov" class="form-select" style="margin-bottom:10px"></select>
+    <label class="form-label">Day</label>
+    <select id="ma_day" class="form-select" style="margin-bottom:10px"></select>
+    <label class="form-label">Time</label>
+    <input id="ma_time" type="time" class="form-input" style="margin-bottom:4px" />
+    <div id="ma_warn" style="font-size:12px;color:#9B2C2C;min-height:16px;margin:4px 0 8px"></div>
+    <div class="modal-actions" style="display:flex;justify-content:space-between;align-items:center">
+      <button class="btn btn-ghost btn-sm" style="color:#991b1b" onclick="moveApptDelete()">Delete</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-moveAppt')">Cancel</button>
+        <button class="btn btn-teal btn-sm" onclick="moveApptSave()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div id="modal-addTeacher" class="modal-bg hidden">
   <div class="modal">
     <div class="modal-title">Add Provider</div>
@@ -1372,7 +1392,7 @@ function clearProviderPhoto(which) {
     const i = document.getElementById('tde_photoInput'); if (i) i.value = '';
   }
 }
-function fullName(t) { return t.first+' '+t.last; }
+function fullName(t) { return ((t.first||'')+' '+(t.last||'')).trim(); }
 function fmtTime(t) {
   const [h,m] = t.split(':').map(Number);
   const ap = h>=12?'PM':'AM';
@@ -2641,6 +2661,72 @@ function getAllSlots() {
 
 function renderSchedule() { showSchedTab(schedTab); }
 
+// ── Move / reschedule a saved appointment ─────────────────────────────────────
+let ma_editing = null; // appointment _id being moved
+
+function findApptById(id){
+  for(const t of db.teachers){
+    const s = (t.students||[]).find(x=>String(x._id)===String(id));
+    if(s) return { teacher:t, student:s };
+  }
+  return null;
+}
+
+function openMoveAppt(id){
+  const found = findApptById(id);
+  if(!found){ alert('Save your schedule first, then this spot can be moved. (Try refreshing.)'); return; }
+  ma_editing = id;
+  const { teacher, student } = found;
+  document.getElementById('ma_who').textContent = (student.name||'Client') + (student.address?' · '+student.address:'');
+  const provs = activeTeachers();
+  if(!provs.some(t=>String(t.id)===String(teacher.id))) provs.push(teacher); // keep current provider even if archived
+  document.getElementById('ma_prov').innerHTML = provs.map(t=>`<option value="${t.id}"${String(t.id)===String(teacher.id)?' selected':''}>${fullName(t)}</option>`).join('');
+  document.getElementById('ma_day').innerHTML = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<option value="${d}"${d===student.day?' selected':''}>${d}</option>`).join('');
+  document.getElementById('ma_time').value = student.time;
+  document.getElementById('ma_warn').textContent = '';
+  document.getElementById('modal-moveAppt').classList.remove('hidden');
+}
+
+async function moveApptSave(){
+  if(ma_editing==null) return;
+  const found = findApptById(ma_editing);
+  if(!found){ closeModal('modal-moveAppt'); return; }
+  const { teacher:oldT, student } = found;
+  const newPid = document.getElementById('ma_prov').value;
+  const newDay = document.getElementById('ma_day').value;
+  const newTime = document.getElementById('ma_time').value;
+  if(!newTime){ document.getElementById('ma_warn').textContent = 'Enter a time.'; return; }
+  const newT = db.teachers.find(t=>String(t.id)===String(newPid));
+  if(!newT){ document.getElementById('ma_warn').textContent = 'Pick a provider.'; return; }
+  const tMin = parseInt(newTime)*60 + parseInt(newTime.split(':')[1]);
+  const clash = (newT.students||[]).some(x=>x._id!==student._id && x.day===newDay && Math.abs((parseInt(x.time)*60+parseInt(x.time.split(':')[1])) - tMin) < cfg.apptDuration);
+  if(clash && !confirm("That overlaps another visit on this provider's day. Move it anyway?")) return;
+  await dbUpdateAppointment(student._id, { provider_id:newPid, day:newDay, time:newTime });
+  student.day = newDay; student.time = newTime;
+  if(String(newPid)!==String(oldT.id)){
+    oldT.students = oldT.students.filter(x=>x._id!==student._id);
+    newT.students.push(student);
+  }
+  closeModal('modal-moveAppt');
+  ma_editing = null;
+  renderSchedule();
+  renderDashboard();
+}
+
+async function moveApptDelete(){
+  if(ma_editing==null) return;
+  const found = findApptById(ma_editing);
+  if(!found){ closeModal('modal-moveAppt'); return; }
+  const { teacher, student } = found;
+  if(!confirm(`Remove ${student.name||'this client'} (${student.day} ${fmtTime(student.time)}) from the schedule?`)) return;
+  await dbDeleteAppointment(student._id);
+  teacher.students = teacher.students.filter(x=>x._id!==student._id);
+  closeModal('modal-moveAppt');
+  ma_editing = null;
+  renderSchedule();
+  renderDashboard();
+}
+
 function renderScheduleList() {
   const allSlots = getAllSlots();
   const el = document.getElementById('masterScheduleTable');
@@ -2648,8 +2734,8 @@ function renderScheduleList() {
   el.innerHTML = `<table class="schedule-table"><thead><tr><th>Day</th><th>Time</th><th id="sch_workerHead">Provider</th><th id="sch_clientHead">Client</th><th>Address</th></tr></thead><tbody>`
     + allSlots.map(s=>{
       const c=AVATAR_COLORS[s.teacher.color%AVATAR_COLORS.length];
-      return `<tr><td><span class="badge badge-navy">${s.day}</span></td><td>${fmtTime(s.time)}</td>
-        <td><span style="display:inline-flex;align-items:center;gap:6px">${avatarHtml(s.teacher, 22, 9)}${s.teacher.first} ${s.teacher.last}</span></td>
+      return `<tr style="cursor:pointer" onclick="openMoveAppt('${s._id}')" title="Click to move"><td><span class="badge badge-navy">${s.day}</span></td><td>${fmtTime(s.time)}</td>
+        <td><span style="display:inline-flex;align-items:center;gap:6px">${avatarHtml(s.teacher, 22, 9)}${fullName(s.teacher)}</span></td>
         <td>${s.name}</td><td style="font-size:12px;color:var(--muted)">${s.address}</td></tr>`;
     }).join('')
     + '</tbody></table>';
@@ -2686,9 +2772,9 @@ function renderScheduleWeek() {
       html += `<div class="week-cell">`;
       events.forEach(s => {
         const c = AVATAR_COLORS[s.teacher.color % AVATAR_COLORS.length];
-        html += `<div class="week-event" style="background:${c.bg};color:${c.tx};border-color:${c.tx}" title="${s.teacher.first} ${s.teacher.last} · ${s.name} · ${s.address}">
+        html += `<div class="week-event" onclick="openMoveAppt('${s._id}')" style="cursor:pointer;background:${c.bg};color:${c.tx};border-color:${c.tx}" title="Click to move · ${fullName(s.teacher)} · ${s.name} · ${s.address}">
           <div style="font-weight:500;font-size:9px">${s.name||'Client'}</div>
-          <div style="font-size:9px;opacity:0.8">${s.teacher.first} ${s.teacher.last[0]}.</div>
+          <div style="font-size:9px;opacity:0.8">${s.teacher.first}${s.teacher.last?' '+s.teacher.last[0]+'.':''}</div>
         </div>`;
       });
       html += `</div>`;
@@ -2742,7 +2828,7 @@ function renderScheduleMonth() {
     const showMax = 3;
     const evHtml = dayEvents.slice(0, showMax).map(s => {
       const c = AVATAR_COLORS[s.teacher.color % AVATAR_COLORS.length];
-      return `<div class="month-event" style="background:${c.bg};color:${c.tx};border-color:${c.tx}" title="${fmtTime(s.time)} · ${s.teacher.first} ${s.teacher.last} · ${s.name}">${fmtTime(s.time)} ${s.name||'Client'}</div>`;
+      return `<div class="month-event" onclick="openMoveAppt('${s._id}')" style="cursor:pointer;background:${c.bg};color:${c.tx};border-color:${c.tx}" title="Click to move · ${fmtTime(s.time)} · ${fullName(s.teacher)} · ${s.name}">${fmtTime(s.time)} ${s.name||'Client'}</div>`;
     }).join('');
     const more = dayEvents.length > showMax ? `<div class="month-more">+${dayEvents.length-showMax} more</div>` : '';
     html += `<div class="month-cell">${dateLabel}${evHtml}${more}</div>`;
@@ -4475,6 +4561,18 @@ async function dbSaveAppointment(providerId, apt) {
 async function dbDeleteAppointment(appointmentId) {
   if (!currentUser) return;
   await sb.from('appointments').delete().eq('id', appointmentId).eq('user_id', dataOwnerId);
+}
+
+async function dbUpdateAppointment(appointmentId, fields) {
+  if (!currentUser) return;
+  const upd = {};
+  if (fields.provider_id != null) upd.provider_id = fields.provider_id;
+  if (fields.day != null) upd.day = fields.day;
+  if (fields.time != null) upd.time = fields.time;
+  if (fields.address != null) upd.address = fields.address;
+  if (fields.name != null) upd.name = fields.name;
+  const { error } = await sb.from('appointments').update(upd).eq('id', appointmentId).eq('user_id', dataOwnerId);
+  if (error) console.error('Update appointment error:', error.message);
 }
 
 async function dbSaveAvailability(providerId, avail) {
