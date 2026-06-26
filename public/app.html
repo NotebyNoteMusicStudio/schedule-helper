@@ -630,20 +630,15 @@ body {
       <p style="font-size:13px;color:var(--muted);margin-bottom:0.75rem">For a single provider managing their own schedule. Set your availability, add client requests and let the system build your week.</p>
 
       <div data-drive-only style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1.25rem">
-        <span style="font-size:13px;color:var(--muted)">How do you work?</span>
-        <button id="solo_mode_mobile" class="btn btn-sm" onclick="setSoloMode('mobile')">🚗 I travel to clients</button>
-        <button id="solo_mode_location" class="btn btn-sm" onclick="setSoloMode('location')">📍 Clients come to me</button>
-        <span id="solo_buffer_wrap" style="display:inline-flex;align-items:center;gap:6px">
-          <span style="font-size:13px;color:var(--muted)">Travel buffer</span>
-          <select class="form-select" id="solo_buffer" style="width:auto;padding:4px 8px">
-            <option value="0">None</option>
-            <option value="10">10 min</option>
-            <option value="15" selected>15 min</option>
-            <option value="20">20 min</option>
-            <option value="30">30 min</option>
-          </select>
-        </span>
-        <span id="solo_mode_hint" style="font-size:12px;color:var(--muted)"></span>
+        <span style="font-size:13px;color:var(--muted)">Travel buffer between visits</span>
+        <select class="form-select" id="solo_buffer" style="width:auto;padding:4px 8px">
+          <option value="0">None</option>
+          <option value="10">10 min</option>
+          <option value="15" selected>15 min</option>
+          <option value="20">20 min</option>
+          <option value="30">30 min</option>
+        </select>
+        <span style="font-size:12px;color:var(--muted)">Drive times come from your business type in Settings.</span>
       </div>
 
       <div class="grid-2" style="align-items:start">
@@ -3107,7 +3102,7 @@ function initSettingsView() {
   // Hide all drive-time-only UI when clients come to the provider (no travel between visits)
   const isLoc = cfg.bizType === 'location';
   document.querySelectorAll('[data-drive-only]').forEach(elm => { elm.style.display = isLoc ? 'none' : ''; });
-  if (isLoc && typeof setSoloMode === 'function') setSoloMode('location'); // no travel option in a location business
+  if (typeof soloState !== 'undefined') soloState.mode = isLoc ? 'location' : 'mobile'; // Solo follows Settings
   const bin = document.getElementById('batchIntroNote');
   if (bin) bin.textContent = isLoc
     ? 'Batch placement matches each student to the best open time, then locks each slot as you confirm so two students never land in the same spot. Review and adjust every match before saving.'
@@ -3523,7 +3518,7 @@ function setSoloMode(mode) {
 }
 
 function initSoloMode() {
-  setSoloMode(soloState.mode);
+  soloState.mode = cfg.bizType === 'location' ? 'location' : 'mobile';
   renderSoloAvail();
   renderSoloClientList();
   if (soloState.schedule.length) renderSoloSchedule();
@@ -3696,89 +3691,104 @@ function renderSoloClientList() {
 }
 
 // ── Auto-placement engine ──────────────────────────────────────────────────────
+// Single-operator placement. Reuses the same preference parsing as batch:
+// honors requested day(s), exact times (4:30, 5:30), time windows, and flexibility,
+// packs visits minute-by-minute, and (in travel mode) spaces them by drive time + buffer.
+function soloCandidates(R, addr, placedSlots, driveMin, buffer, dur, isLoc){
+  const out = [];
+  const gapTo = nbrAddr => isLoc ? 0 : (driveMin(addr, nbrAddr) + buffer);
+  soloState.availability.forEach(a=>{
+    const dayShort = a.day.slice(0,3);
+    if(R.days.length && !R.days.includes(dayShort)) return;
+    const winStart = parseInt(a.from)*60 + parseInt(a.from.split(':')[1]);
+    const winEnd   = parseInt(a.to)*60 + parseInt(a.to.split(':')[1]);
+    const existing = placedSlots.filter(p=>p.day===a.day).sort((x,y)=>x.min-y.min);
+    const cand = new Set();
+    cand.add(winStart);
+    if(R.exactMin!=null) cand.add(R.exactMin);
+    if(R.bucket) cand.add(Math.max(winStart, Math.round(R.bucket[0]*60)));
+    existing.forEach(e=>{ cand.add(e.min + dur + gapTo(e.address)); cand.add(e.min - gapTo(e.address) - dur); });
+    cand.forEach(cm0=>{
+      const cm = Math.round(cm0);
+      if(cm < winStart || cm+dur > winEnd) return;
+      for(const e of existing){ if(cm < e.min+dur && e.min < cm+dur) return; } // no overlap
+      const t24 = String(Math.floor(cm/60)).padStart(2,'0')+':'+String(cm%60).padStart(2,'0');
+      const timeFit = slotTimeFit(R, { slotMin: cm, hourFloat: cm/60 });
+      let tight = false;
+      if(!isLoc){
+        existing.forEach(e=>{
+          const need = gapTo(e.address);
+          if(e.min < cm){ if(cm - (e.min+dur) < need) tight = true; }
+          else if(e.min > cm){ if(e.min - (cm+dur) < need) tight = true; }
+        });
+      }
+      let cluster = 600;
+      if(existing.length){
+        let best = Infinity;
+        existing.forEach(e=>{ const g = Math.abs(cm - e.min) + (isLoc?0:0.5*driveMin(addr, e.address)); if(g<best) best = g; });
+        cluster = best;
+      }
+      out.push({ dayFull: a.day, dayShort, t24, min: cm, timeFit, tight, cluster });
+    });
+  });
+  return out;
+}
+
 async function runSoloPlacement() {
   if (!soloState.availability.length) { alert('Please add your availability first.'); return; }
   if (!soloState.clients.length) { alert('Please add at least one client request.'); return; }
 
   const btn = document.querySelector('#view-solo button.btn-teal');
   const origLabel = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = soloState.mode==='mobile' ? 'Calculating drive times…' : 'Placing…'; }
+  const isLoc = cfg.bizType === 'location';
+  if (btn) { btn.disabled = true; btn.textContent = isLoc ? 'Placing…' : 'Calculating drive times…'; }
 
-  const TIME_RANGES = {
-    'Morning': [8,12], 'Afternoon': [12,16], 'After school': [14,17], 'Evening': [16.5,20], '': [0,24], 'Any': [0,24]
-  };
   const dur = cfg.apptDuration;
-  const buffer = parseInt(document.getElementById('solo_buffer')?.value || '15', 10);
+  const buffer = isLoc ? 0 : parseInt(document.getElementById('solo_buffer')?.value || '15', 10);
 
-  // Build all open slots from availability
-  let openSlots = [];
-  soloState.availability.forEach(a => {
-    let cur = parseInt(a.from)*60 + parseInt(a.from.split(':')[1]);
-    const end = parseInt(a.to)*60 + parseInt(a.to.split(':')[1]);
-    while (cur + dur <= end) {
-      const hh = Math.floor(cur/60).toString().padStart(2,'0');
-      const mm = (cur%60).toString().padStart(2,'0');
-      openSlots.push({ day: a.day, time: hh+':'+mm, taken: false });
-      cur += dur;
-    }
-  });
-
-  // In "I travel" mode, fetch real drive times between client addresses.
+  // Drive minutes between addresses (real Google times in travel mode; 0 when clients come to you).
   let driveMin = (a,b) => (!a||!b||a===b) ? 0 : Math.round(haversine(simGeo(a), simGeo(b)) * 2);
-  if (soloState.mode === 'mobile') {
-    driveMin = await soloDriveMatrix(soloState.clients.map(c => c.address));
-  }
+  if (!isLoc) { driveMin = await soloDriveMatrix(soloState.clients.map(c => c.address)); }
 
-  // Sort clients: prefer those with specific day+time first
-  const sorted = [...soloState.clients].sort((a,b) => {
-    const aSpec = (a.prefDay?1:0) + (a.prefTime?1:0);
-    const bSpec = (b.prefDay?1:0) + (b.prefTime?1:0);
-    return bSpec - aSpec;
-  });
+  const availDaysShort = soloState.availability.map(a => a.day.slice(0,3));
 
-  const placed = [];
-  const unplaced = [];
+  // Most-constrained first: exact time, then time window, then anything.
+  const items = soloState.clients.map(c => ({ c, R: resolveStudent(c) }));
+  const rank = R => (R.exactMin!=null ? 0 : (R.bucket ? 1 : 2));
+  items.sort((a,b) => rank(a.R) - rank(b.R));
 
-  sorted.forEach(client => {
-    const [tStart, tEnd] = TIME_RANGES[client.prefTime] || [0,24];
+  const placedSlots = []; // { day(full), min, address }
+  const placed = [], unplaced = [];
 
-    let pool = openSlots.filter(s => {
-      if (s.taken) return false;
-      if (client.prefDay && s.day !== client.prefDay) return false;
-      const h = parseInt(s.time.split(':')[0]) + parseInt(s.time.split(':')[1]||0)/60;
-      if (client.prefTime && (h < tStart || h >= tEnd)) return false;
-      return true;
-    });
+  items.forEach(({ c, R }) => {
+    // Requested a day the operator never works?
+    if (R.days.length && !R.days.some(d => availDaysShort.includes(d))) {
+      unplaced.push({ client: c, reason: 'day' }); return;
+    }
+    const cands = soloCandidates(R, c.address, placedSlots, driveMin, buffer, dur, isLoc);
+    if (!cands.length) { unplaced.push({ client: c, reason: 'full' }); return; }
+    cands.sort((a,b) => a.timeFit - b.timeFit || (a.tight?1:0)-(b.tight?1:0) || a.cluster - b.cluster || a.min - b.min);
+    const best = cands[0];
+    const wantSpecific = (R.exactMin!=null) || (R.bucket!=null);
+    // Not flexible and we can't give the requested time → don't silently move them.
+    if (best.timeFit > 0 && R.flexibility === 'fixed' && wantSpecific) {
+      unplaced.push({ client: c, reason: 'time' }); return;
+    }
+    placedSlots.push({ day: best.dayFull, min: best.min, address: c.address });
     let note = '';
-
-    if (!pool.length) {
-      // Try without day preference
-      pool = openSlots.filter(s => {
-        if (s.taken) return false;
-        const h = parseInt(s.time.split(':')[0]) + parseInt(s.time.split(':')[1]||0)/60;
-        if (client.prefTime && (h < tStart || h >= tEnd)) return false;
-        return true;
-      });
-      if (!pool.length) { unplaced.push(client); return; }
-      note = 'Day preference not available';
+    if (best.timeFit > 0 && wantSpecific) {
+      note = R.exactMin!=null ? `Closest open time to ${fmtMin(R.exactMin)}` : `Closest open ${bucketName(R.bucket).toLowerCase()} slot`;
+    } else if (best.tight) {
+      note = 'tight — travel may not fit';
     }
-
-    let chosen;
-    if (soloState.mode === 'location') {
-      chosen = { slot: earliestSlot(pool), reachable: true };
-    } else {
-      chosen = pickSoloMobileSlot(pool, placed, client, driveMin, buffer, dur);
-    }
-    const best = chosen.slot;
-    best.taken = true;
-    const finalNote = note || (chosen.reachable ? '' : 'tight — travel may not fit');
-    placed.push({ client, slot: best, note: finalNote });
-    logRequest({ clientName: client.name, clientAddress: client.address, providerName: 'Solo Operator', slot: best.day.slice(0,3)+' '+fmtTime(best.time), status:'placed' });
+    placed.push({ client: c, slot: { day: best.dayFull, time: best.t24 }, note });
+    logRequest({ clientName: c.name, clientAddress: c.address, providerName: 'Solo Operator', slot: best.dayFull.slice(0,3)+' '+fmtTime(best.t24), status:'placed' });
   });
 
   soloState.schedule = placed;
-  unplaced.forEach(c => logRequest({ clientName: c.name, clientAddress: c.address, providerName: '—', slot: '—', status:'pending', notes: 'Could not place — no matching slots' }));
-  soloState.unplaced = unplaced;
+  soloState.unplaced = unplaced.map(u => u.client);
+  unplaced.forEach(u => logRequest({ clientName: u.client.name, clientAddress: u.client.address, providerName: '—', slot: '—', status:'pending',
+    notes: u.reason==='day' ? 'Requested day not in availability' : (u.reason==='time' ? 'Not flexible — requested time unavailable' : 'No open slots') }));
   if (btn) { btn.disabled = false; btn.textContent = origLabel || '⚡ Auto-place all clients'; }
   renderSoloSchedule();
 }
