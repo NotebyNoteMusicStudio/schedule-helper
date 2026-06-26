@@ -593,7 +593,7 @@ body {
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;gap:8px">
                 <div class="card-title" style="margin-bottom:0">Queue (<span id="batch_count">0</span>)</div>
                 <div style="display:flex;gap:6px">
-                  <button class="btn btn-teal btn-sm" onclick="batchPlaceAll()">Place all →</button>
+                  <button class="btn btn-teal btn-sm" onclick="batchPlaceAll()">Check Schedule →</button>
                   <button class="btn btn-ghost btn-sm" onclick="batchClearAll()">Clear</button>
                 </div>
               </div>
@@ -2332,6 +2332,25 @@ function batchMatchStudent(stu, si, taken, ctx, placed){
   return cands;
 }
 
+// Place a single student given current locks + clustering picture. Mutates taken/placed.
+function batchPlaceOne(stu, si, R, taken, ctx, placed, origIdx){
+  const cands = batchMatchStudent(stu, si, taken, ctx, placed);
+  if(cands.length){
+    const best = cands[0];
+    const hardWanted = (R.exactMin!=null) || (R.bucket!=null);
+    if(best.off && R.flexibility==='fixed' && hardWanted){
+      return { unplaceable: { stu, R, nearest: getTeacher(best.teacherId), mins: best.mins, reason:'fixed-miss', _i: origIdx } };
+    }
+    taken.add(best.slot.key);
+    (placed.byDay[best.teacherId+'|'+best.slot.dayShort] = placed.byDay[best.teacherId+'|'+best.slot.dayShort]||[]).push({ min: best.slot.slotMin, address: stu.address||'' });
+    (placed.byProv[best.teacherId] = placed.byProv[best.teacherId]||[]).push(best.slot.slotMin);
+    return { proposal: { stu, R, teacherId: best.teacherId, slot: best.slot, mins: best.mins, off: best.off, tight: best.tight, _i: origIdx } };
+  }
+  let near=null, nd=Infinity;
+  activeTeachers().forEach(t=>{ const {mins}=batchProxMin(si,t,ctx); if(mins<nd){ nd=mins; near=t; } });
+  return { unplaceable: { stu, R, nearest: near, mins: (nd===Infinity?null:nd), reason:'no-slot', _i: origIdx } };
+}
+
 async function batchPlaceAll(){
   if(!batchState.students.length){ alert('Add at least one student to the queue first.'); return; }
 
@@ -2367,24 +2386,8 @@ async function batchPlaceAll(){
   const placed = buildPlaced([], null); // start from existing routes only
   const proposals = [], unplaceable = [];
   ordered.forEach(({stu, si, R})=>{
-    const cands = batchMatchStudent(stu, si, taken, ctx, placed);
-    if(cands.length){
-      const best = cands[0];
-      const hardWanted = (R.exactMin!=null) || (R.bucket!=null);
-      if(best.off && R.flexibility==='fixed' && hardWanted){
-        unplaceable.push({ stu, R, nearest: getTeacher(best.teacherId), mins: best.mins, reason:'fixed-miss', _i: origIndex[stu.id] });
-      } else {
-        taken.add(best.slot.key);
-        proposals.push({ stu, R, teacherId: best.teacherId, slot: best.slot, mins: best.mins, off: best.off, tight: best.tight, _i: origIndex[stu.id] });
-        // fold into the clustering picture so the next student packs against it
-        (placed.byDay[best.teacherId+'|'+best.slot.dayShort] = placed.byDay[best.teacherId+'|'+best.slot.dayShort]||[]).push({ min: best.slot.slotMin, address: stu.address||'' });
-        (placed.byProv[best.teacherId] = placed.byProv[best.teacherId]||[]).push(best.slot.slotMin);
-      }
-    } else {
-      let near=null, nd=Infinity;
-      activeTeachers().forEach(t=>{ const {mins}=batchProxMin(si,t,ctx); if(mins<nd){ nd=mins; near=t; } });
-      unplaceable.push({ stu, R, nearest: near, mins: (nd===Infinity?null:nd), reason:'no-slot', _i: origIndex[stu.id] });
-    }
+    const res = batchPlaceOne(stu, si, R, taken, ctx, placed, origIndex[stu.id]);
+    if(res.proposal) proposals.push(res.proposal); else unplaceable.push(res.unplaceable);
   });
   proposals.sort((a,b)=>a._i-b._i);
   unplaceable.sort((a,b)=>a._i-b._i);
@@ -2393,18 +2396,49 @@ async function batchPlaceAll(){
   batchState.taken = taken;
   batchState.ctx = ctx;
   renderBatchResults();
-  if(overflow) setTimeout(()=>alert(`Processed the first ${BATCH_MAX}. ${overflow} more still in the queue — confirm these, then run Place all again.`), 100);
+  if(overflow) setTimeout(()=>alert(`Checked the first ${BATCH_MAX}. ${overflow} more still in the queue — confirm these, then run Check Schedule again.`), 100);
 }
 
-function batchAdjust(sel){
-  const [iStr, tid, dayShort, t24] = sel.value.split('@@');
-  const i = +iStr;
+// Re-run placement for everyone NOT locked, keeping locked (manually set) students fixed.
+function batchReshuffle(){
+  const ctx = batchState.ctx;
+  if(!ctx){ alert('Run Check Schedule first.'); return; }
+  const locked = batchState.proposals.filter(p=>p.manual);
+  const skipped = batchState.unplaceable.filter(u=>u.reason==='skipped');
+  const toReplace = batchState.proposals.filter(p=>!p.manual).map(p=>p.stu)
+    .concat(batchState.unplaceable.filter(u=>u.reason!=='skipped').map(u=>u.stu));
+  if(!toReplace.length){ alert('Nothing to reshuffle — every student is locked. Unlock one or set fewer.'); return; }
+
+  const taken = new Set();
+  activeTeachers().forEach(t=>t.students.forEach(s=>{ if(s.day&&s.time) taken.add(t.id+'|'+s.day+'|'+s.time); }));
+  locked.forEach(p=>taken.add(p.slot.key));
+  const placed = buildPlaced(locked, null); // existing + locked
+
+  const rank = R => (R.exactMin!=null ? 0 : (R.bucket ? 1 : 2));
+  const ordered = toReplace.map(stu=>({ stu, si: ctx.studentOriginIdx[stu.id], R: resolveStudent(stu) }));
+  ordered.sort((a,b)=> rank(a.R)-rank(b.R) || ctx.studentOriginIdx[a.stu.id]-ctx.studentOriginIdx[b.stu.id]);
+
+  const proposals = [...locked], unplaceable = [];
+  ordered.forEach(({stu, si, R})=>{
+    const res = batchPlaceOne(stu, si, R, taken, ctx, placed, ctx.studentOriginIdx[stu.id]);
+    if(res.proposal) proposals.push(res.proposal); else unplaceable.push(res.unplaceable);
+  });
+  proposals.sort((a,b)=>a._i-b._i);
+  unplaceable.sort((a,b)=>a._i-b._i);
+  batchState.proposals = proposals;
+  batchState.unplaceable = [...unplaceable, ...skipped];
+  batchState.taken = taken;
+  renderBatchResults();
+}
+
+function batchApplyPick(i, val, lock){
+  const [iStr, tid, dayShort, t24] = val.split('@@');
   const p = batchState.proposals[i];
   if(!p) return;
   batchState.taken.delete(p.slot.key);
   const key = tid+'|'+dayShort+'|'+t24;
-  p.teacherId = tid;
   const slotMin = parseInt(t24)*60 + parseInt(t24.split(':')[1]);
+  p.teacherId = tid;
   p.slot = { dayShort, t24, key, slotMin, label: dayShort+' '+fmtTime(t24), hourFloat: slotMin/60 };
   p.off = slotTimeFit(resolveStudent(p.stu), p.slot) > 0;
   batchState.taken.add(key);
@@ -2412,10 +2446,15 @@ function batchAdjust(sel){
   const t2 = getTeacher(tid);
   if(si!=null && t2 && batchState.ctx){
     p.mins = batchProxMin(si, t2, batchState.ctx).mins;
-    const placed = buildPlaced(batchState.proposals, p.stu.id);
-    p.tight = batchSlotTight(t2, p.slot, si, batchState.ctx, placed, cfg.apptDuration);
+    p.tight = batchSlotTight(t2, p.slot, si, batchState.ctx, buildPlaced(batchState.proposals, p.stu.id), cfg.apptDuration);
   }
+  if(lock) p.manual = true;
   renderBatchResults();
+}
+function batchSetPick(i){
+  const sel = document.getElementById('bp_pick_'+i);
+  if(!sel || !sel.value) return;
+  batchApplyPick(i, sel.value, true);
 }
 
 function batchManualSet(i){
@@ -2471,9 +2510,12 @@ function renderBatchResults(){
     html += `<div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;gap:8px">
         <div class="card-title" style="margin-bottom:0">Review assignments (${batchState.proposals.length})</div>
-        <button class="btn btn-teal btn-sm" onclick="batchConfirmAll()">✓ Confirm all & save</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" onclick="batchReshuffle()">↻ Reshuffle unset</button>
+          <button class="btn btn-teal btn-sm" onclick="batchConfirmAll()">✓ Confirm all &amp; save</button>
+        </div>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Requested times come first; flexible students are clustered next to the provider's nearby visits to keep the day tight. Use the dropdown to move anyone before saving.</div>`;
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Requested times come first; flexible students are clustered next to the provider's nearby visits to keep the day tight. <strong>Set</strong> a row to lock it (turns green), then <strong>Reshuffle unset</strong> to redo everyone else around your locked picks.</div>`;
     html += batchState.proposals.map((p,i)=>{
       const t = getTeacher(p.teacherId);
       const R = p.R || resolveStudent(p.stu);
@@ -2507,7 +2549,8 @@ function renderBatchResults(){
         </div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
           <span style="font-size:11px;color:var(--muted);min-width:64px">Quick pick:</span>
-          <select class="form-select" style="max-width:320px;font-size:12px;padding:4px 8px" onchange="batchAdjust(this)">${opts}</select>
+          <select id="bp_pick_${i}" class="form-select" style="max-width:320px;font-size:12px;padding:4px 8px">${opts}</select>
+          <button class="btn btn-ghost btn-sm" onclick="batchSetPick(${i})">Set</button>
         </div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
           <span style="font-size:11px;color:var(--muted);min-width:64px">Set exact:</span>
