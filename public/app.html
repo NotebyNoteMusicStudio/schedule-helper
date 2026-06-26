@@ -2490,27 +2490,31 @@ function renderBatchResults(){
       const tch = R.teacherReq ? (getTeacher(R.teacherReq)?' · wants '+fullName(getTeacher(R.teacherReq)):'') : '';
       const provOpts = activeTeachers().map(pt=>`<option value="${pt.id}"${String(pt.id)===String(p.teacherId)?' selected':''}>${fullName(pt)}</option>`).join('');
       const dayOpts = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<option value="${d}"${d===p.slot.dayShort?' selected':''}>${d}</option>`).join('');
-      return `<div style="padding:9px 0;border-bottom:1px solid var(--border)">
+      const rowStyle = p.manual ? 'padding:9px 10px;border-bottom:1px solid var(--border);background:rgba(45,122,95,0.07);border-left:3px solid var(--success)' : 'padding:9px 0;border-bottom:1px solid var(--border)';
+      return `<div style="${rowStyle}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
           <div style="min-width:0">
-            <div style="font-weight:500;font-size:13px;color:var(--navy)">${p.stu.name} ${flexBadge(R.flexibility)}${p.manual?' <span style="font-size:11px;color:var(--teal-dark)">✓ manual</span>':''}</div>
+            <div style="font-weight:500;font-size:13px;color:var(--navy)">${p.stu.name} ${flexBadge(R.flexibility)}${p.manual?` <span style="font-size:11px;color:#fff;background:var(--success);padding:1px 8px;border-radius:8px;font-weight:600">✓ Set to ${p.slot.label}</span>`:''}</div>
             <div style="font-size:12px;color:var(--muted)">${p.stu.address}</div>
             <div style="font-size:11px;color:var(--muted)">Requested: ${prefDesc(R)}${tch}${R.notes?' · 📝 '+R.notes:''}</div>
           </div>
           <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="batchSkip(${i})">Skip</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
-          <span style="font-size:12px;color:var(--navy)">→ ${fullName(t)}, <strong>${p.slot.label}</strong>${driveLabel?` · ${driveLabel}`:''}</span>
+          <span style="font-size:12px;color:var(--navy)">${p.manual?'✅ ':'→ '}${fullName(t)}, <strong>${p.slot.label}</strong>${driveLabel?` · ${driveLabel}`:''}</span>
           ${p.off?'<span style="font-size:11px;color:#8a5e10;background:rgba(200,134,26,0.14);padding:1px 7px;border-radius:8px">not their requested time</span>':''}
           ${p.tight?'<span style="font-size:11px;color:#9B2C2C;background:rgba(155,44,44,0.10);padding:1px 7px;border-radius:8px">tight drive — check travel time</span>':''}
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--muted);min-width:64px">Quick pick:</span>
           <select class="form-select" style="max-width:320px;font-size:12px;padding:4px 8px" onchange="batchAdjust(this)">${opts}</select>
         </div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
-          <span style="font-size:11px;color:var(--muted)">Set manually:</span>
+          <span style="font-size:11px;color:var(--muted);min-width:64px">Set exact:</span>
           <select id="bm_prov_${i}" class="form-select" style="font-size:12px;padding:3px 6px;width:auto">${provOpts}</select>
           <select id="bm_day_${i}" class="form-select" style="font-size:12px;padding:3px 6px;width:auto">${dayOpts}</select>
           <input id="bm_time_${i}" type="time" class="form-input" style="font-size:12px;padding:3px 6px;width:130px" value="${p.slot.t24}" />
-          <button class="btn btn-ghost btn-sm" onclick="batchManualSet(${i})">Set</button>
+          <button class="btn ${p.manual?'btn-teal':'btn-ghost'} btn-sm" onclick="batchManualSet(${i})">${p.manual?'✓ Set':'Set'}</button>
         </div>
       </div>`;
     }).join('') + '</div>';
