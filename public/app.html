@@ -538,7 +538,7 @@ body {
                   <div><label class="form-label">Name</label><input class="form-input" id="bf_name" placeholder="First Last" /></div>
                   <div><label class="form-label">Address</label><input class="form-input" id="bf_addr" placeholder="123 Main St, City" /></div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
                   <div><label class="form-label">Pref. day</label>
                     <select class="form-select" id="bf_day">
                       <option value="">Any</option>
@@ -552,6 +552,7 @@ body {
                       <option>Morning</option><option>Afternoon</option><option>After school</option><option>Evening</option>
                     </select>
                   </div>
+                  <div><label class="form-label">Exact time</label><input class="form-input" type="time" id="bf_exact" /></div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
                   <div><label class="form-label">Requested <span data-cfg="workerSingle">provider</span></label>
@@ -569,8 +570,8 @@ body {
               </div>
 
               <div id="batch_paste" class="hidden">
-                <p class="hint" style="margin-bottom:8px">One per line. Format: <code style="background:var(--cream-dark);padding:1px 5px;border-radius:4px">Name, Address, Day, Time, Notes</code></p>
-                <textarea class="paste-area" id="batch_pasteText" placeholder="Sarah Jones, 123 Oak St Chattanooga TN, Tuesday, After school, dad picks up Fridays&#10;Mike Chen, 456 Pine Ave Chattanooga TN, Monday, Any,&#10;Lisa Park, 789 Elm St, Friday, Morning, flexible"></textarea>
+                <p class="hint" style="margin-bottom:8px">One per line: <code style="background:var(--cream-dark);padding:1px 5px;border-radius:4px">Name, Address, Day &amp; time, Flexibility, Notes</code>. Day/time can be natural — "Tue 4pm", "Mon or Wed after school", "Tuesday 4:30". Flexibility reads "not flexible" / "somewhat" / "flexible". Naming a provider ("wants Gloria") routes to them.</p>
+                <textarea class="paste-area" id="batch_pasteText" placeholder="Ira Sai, 1070 Stanford Ln Prosper, Tue 4pm, Not flexible, Really wants that spot&#10;Nyra Kusuma, 1070 Columbus Ln Prosper, Tue or Wed, Flexible, fine during summer&#10;Rana Gouthami, 4510 Mayfield Dr Prosper, any time, Flexible, wants Gloria"></textarea>
                 <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="batchParsePaste()">Import list</button>
               </div>
 
@@ -578,7 +579,7 @@ body {
                 <div class="drop-zone" id="batch_dropzone" onclick="document.getElementById('batch_csvInput').click()" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="batchHandleDrop(event)">
                   <div style="font-size:28px;margin-bottom:8px">📄</div>
                   <div style="font-weight:500;color:var(--navy)">Drop CSV here or click to browse</div>
-                  <div class="hint" style="margin-top:4px">Columns: Name, Address, Preferred Day, Preferred Time, Notes</div>
+                  <div class="hint" style="margin-top:4px">Columns: Name, Address, Day &amp; time, Flexibility, Notes</div>
                 </div>
                 <input type="file" id="batch_csvInput" accept=".csv" class="hidden" onchange="batchHandleCSV(this)" />
                 <div style="margin-top:10px"><a href="#" onclick="batchDownloadTemplate();return false" style="font-size:12px;color:var(--navy)">↓ Download CSV template</a></div>
@@ -1944,11 +1945,12 @@ function batchAddForm(){
     name, address: addr,
     prefDay: document.getElementById('bf_day').value,
     prefTime: document.getElementById('bf_time').value,
+    exact: document.getElementById('bf_exact').value,
     teacherReq: document.getElementById('bf_teacher').value,
     flexibility: document.getElementById('bf_flex').value,
     notes: document.getElementById('bf_notes').value.trim()
   });
-  ['bf_name','bf_addr','bf_notes'].forEach(id=>document.getElementById(id).value='');
+  ['bf_name','bf_addr','bf_notes','bf_exact'].forEach(id=>document.getElementById(id).value='');
   ['bf_day','bf_time','bf_teacher','bf_flex'].forEach(id=>document.getElementById(id).value='');
   renderBatchQueue();
 }
@@ -2003,7 +2005,7 @@ function batchParseCSV(file){
 }
 
 function batchDownloadTemplate(){
-  const csv = 'Name,Address,Preferred Day,Preferred Time,Notes\nSarah Jones,123 Oak St Chattanooga TN,Tuesday,After school,dad picks up Fridays\nMike Chen,456 Pine Ave Chattanooga TN,Monday,Any,';
+  const csv = 'Name,Address,Day & time,Flexibility,Notes\nIra Sai,1070 Stanford Ln Prosper TX,Tue 4pm,Not flexible,Really wants that spot\nNyra Kusuma,1070 Columbus Ln Prosper TX,Tue or Wed,Flexible,fine during summer';
   const a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download = 'student-list-template.csv';
@@ -2030,36 +2032,107 @@ function renderBatchQueue(){
   if(!el) return;
   if(!batchState.students.length){ el.innerHTML = '<div class="empty" style="padding:1rem">No students queued yet.</div>'; return; }
   el.innerHTML = batchState.students.map(s=>{
-    const meta = [s.prefDay||'Any day', s.prefTime||'Any time'];
-    if(s.teacherReq){ const t=getTeacher(s.teacherReq); if(t) meta.push('wants '+fullName(t)); }
+    const R = resolveStudent(s);
+    const tch = R.teacherReq ? (getTeacher(R.teacherReq)?' · wants '+fullName(getTeacher(R.teacherReq)):'') : '';
     return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="min-width:0">
-        <div style="font-weight:500;font-size:13px;color:var(--navy)">${s.name} ${flexBadge(s.flexibility)}</div>
+        <div style="font-weight:500;font-size:13px;color:var(--navy)">${s.name} ${flexBadge(R.flexibility)}</div>
         <div style="font-size:12px;color:var(--muted)">${s.address}</div>
-        <div style="font-size:11px;color:var(--muted)">${meta.join(' · ')}${s.notes?' · 📝 '+s.notes:''}</div>
+        <div style="font-size:11px;color:var(--muted)">${prefDesc(R)}${tch}${R.notes?' · 📝 '+R.notes:''}</div>
       </div>
       <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="batchRemoveStudent(${s.id})">✕</button>
     </div>`;
   }).join('');
 }
 
-// ---- matching engine (estimate-based proximity; single-placement flow untouched) ----
-function batchTimeRange(prefTime){
-  const p = (prefTime||'').toLowerCase();
+// ---- preference parsing (understands typed times, days, flexibility, teacher names) ----
+function parseExactTime(text){
+  if(!text) return null;
+  const re = /(\b\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/gi;
+  let m;
+  while((m = re.exec(text))){
+    let h = parseInt(m[1]); if(h>23) continue;
+    const min = m[2] ? parseInt(m[2]) : 0;
+    if(min>59) continue;
+    const ap = (m[3]||'').toLowerCase().replace(/\./g,'');
+    let h24;
+    if(ap.startsWith('p')) h24 = (h===12)?12:h+12;
+    else if(ap.startsWith('a')) h24 = (h===12)?0:h;
+    else { if(h>=1 && h<=7) h24 = h+12; else h24 = h; } // bare hour: 1–7 read as afternoon/evening
+    if(h24>=0 && h24<=23) return h24*60 + min;
+  }
+  return null;
+}
+function parseBucket(text){
+  const p = (text||'').toLowerCase();
   if(p.includes('morning')) return [8,12];
   if(p.includes('after school')||p.includes('after-school')||p.includes('afterschool')) return [14,17];
   if(p.includes('afternoon')) return [12,16];
   if(p.includes('evening')) return [16.5,20];
-  return [0,24];
+  return null;
+}
+function bucketName(b){
+  if(!b) return '';
+  if(b[0]===8) return 'Morning'; if(b[0]===12) return 'Afternoon';
+  if(b[0]===14) return 'After school'; if(b[0]===16.5) return 'Evening';
+  return '';
+}
+function parseDaysFromText(text){
+  const t = (text||'').toLowerCase(); const out = [];
+  [['mon','Mon'],['tue','Tue'],['wed','Wed'],['thu','Thu'],['fri','Fri'],['sat','Sat'],['sun','Sun']]
+    .forEach(([k,v])=>{ if(t.includes(k)) out.push(v); });
+  return out;
+}
+function parseFlexFromText(text){
+  const t = (text||'').toLowerCase();
+  if(/not\s*flexible|isn'?t\s*flexible|no\s*flexib|not\s*flex\b|inflexible/.test(t)) return 'fixed';
+  if(/somewhat\s*flexible|kind\s*of\s*flexible|a\s*little\s*flexible|some\s*flexib/.test(t)) return 'somewhat';
+  if(/flexible|flex\b/.test(t)) return 'flexible';
+  return '';
+}
+function parseTeacherFromText(text){
+  const t = (text||'').toLowerCase(); let found = '';
+  activeTeachers().forEach(p=>{
+    const fn = (p.first||'').toLowerCase();
+    if(fn && fn.length>=2 && new RegExp('\\b'+fn.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b').test(t)) found = p.id;
+  });
+  return found;
+}
+// Turn a raw student into a normalized intent. Works for Form entries and free-text paste/CSV.
+function resolveStudent(stu){
+  const prefText = ((stu.prefDay||'') + ' ' + (stu.prefTime||'')).trim();
+  const allText = (prefText + ' ' + (stu.notes||'')).trim();
+  let exactMin = stu.exact ? parseExactTime(stu.exact) : null;
+  if(exactMin==null) exactMin = parseExactTime(prefText);
+  const bucket = exactMin!=null ? null : parseBucket(prefText);
+  const days = parseDaysFromText(prefText);
+  const flexibility = stu.flexibility || parseFlexFromText(allText);
+  const teacherReq = stu.teacherReq || parseTeacherFromText(allText);
+  return { days, exactMin, bucket, teacherReq, flexibility, notes: stu.notes||'' };
+}
+function fmtMin(min){
+  const hh = String(Math.floor(min/60)).padStart(2,'0'), mm = String(min%60).padStart(2,'0');
+  return fmtTime(hh+':'+mm);
+}
+function prefDesc(R){
+  const d = R.days.length ? R.days.join('/') : 'Any day';
+  let tm = 'any time';
+  if(R.exactMin!=null) tm = fmtMin(R.exactMin);
+  else if(R.bucket) tm = bucketName(R.bucket);
+  return d + ' · ' + tm;
+}
+// How well a slot fits the student's requested time. 0 = exact / in-window.
+function slotTimeFit(R, slot){
+  if(R.exactMin!=null) return Math.abs(slot.slotMin - R.exactMin);
+  if(R.bucket) return (slot.hourFloat>=R.bucket[0] && slot.hourFloat<R.bucket[1]) ? 0 : 1000;
+  return 0;
 }
 
-function batchProviderSlots(t, prefDay, taken){
+// All open slots for a provider (every available day), respecting locked slots.
+function batchAllSlots(t, taken){
   const dur = cfg.apptDuration;
-  const days = prefDay
-    ? t.availability.filter(a=>a.day.slice(0,3).toLowerCase()===prefDay.slice(0,3).toLowerCase())
-    : t.availability;
   const out = [];
-  days.forEach(a=>{
+  t.availability.forEach(a=>{
     const dayShort = a.day.slice(0,3);
     const booked = t.students.filter(s=>s.day===dayShort && s.time)
       .map(s=>parseInt(s.time)*60 + parseInt(s.time.split(':')[1]));
@@ -2071,7 +2144,7 @@ function batchProviderSlots(t, prefDay, taken){
       const t24 = hh+':'+mm;
       const key = t.id+'|'+dayShort+'|'+t24;
       if(!booked.includes(cur) && !taken.has(key)){
-        out.push({ dayShort, t24, key, hourFloat: cur/60, label: dayShort+' '+fmtTime(t24) });
+        out.push({ dayShort, t24, key, slotMin: cur, hourFloat: cur/60, label: dayShort+' '+fmtTime(t24) });
       }
       cur += dur;
     }
@@ -2139,23 +2212,22 @@ function batchProxMin(si, t, ctx){
 }
 
 function batchMatchStudent(stu, si, taken, ctx){
+  const R = resolveStudent(stu);
   let providers = activeTeachers().filter(t=>t.availability.length);
-  if(stu.teacherReq) providers = providers.filter(t=>String(t.id)===String(stu.teacherReq));
-  const [tStart,tEnd] = batchTimeRange(stu.prefTime);
+  if(R.teacherReq) providers = providers.filter(t=>String(t.id)===String(R.teacherReq));
   const cands = [];
   providers.forEach(t=>{
-    const slots = batchProviderSlots(t, stu.prefDay, taken);
+    let slots = batchAllSlots(t, taken);
+    if(R.days.length) slots = slots.filter(s=>R.days.includes(s.dayShort));
     if(!slots.length) return;
-    const { mins, est } = batchProxMin(si, t, ctx);
-    const timeMatched = stu.prefTime ? slots.filter(s=>s.hourFloat>=tStart && s.hourFloat<tEnd) : slots;
-    const useSlots = timeMatched.length ? timeMatched : slots;
-    const timeMiss = !!stu.prefTime && !timeMatched.length;
-    useSlots.forEach(s=>cands.push({
-      teacherId: t.id, teacherName: fullName(t), slot: s, mins, est,
-      score: mins + (timeMiss?30:0), timeMiss
-    }));
+    const { mins } = batchProxMin(si, t, ctx);
+    slots.forEach(s=>{
+      const timeFit = slotTimeFit(R, s);
+      cands.push({ teacherId: t.id, teacherName: fullName(t), slot: s, mins, timeFit, off: timeFit>0 });
+    });
   });
-  cands.sort((a,b)=> a.score-b.score || a.slot.hourFloat-b.slot.hourFloat);
+  // STUDENT PREFERENCE FIRST (timeFit), THEN nearest teacher, then earliest slot
+  cands.sort((a,b)=> a.timeFit-b.timeFit || a.mins-b.mins || a.slot.slotMin-b.slot.slotMin);
   return cands;
 }
 
@@ -2185,15 +2257,22 @@ async function batchPlaceAll(){
   activeTeachers().forEach(t=>t.students.forEach(s=>{ if(s.day&&s.time) taken.add(t.id+'|'+s.day+'|'+s.time); }));
   const proposals = [], unplaceable = [];
   queue.forEach((stu, si)=>{
+    const R = resolveStudent(stu);
     const cands = batchMatchStudent(stu, si, taken, ctx);
     if(cands.length){
       const best = cands[0];
-      taken.add(best.slot.key);
-      proposals.push({ stu, teacherId: best.teacherId, slot: best.slot, timeMiss: best.timeMiss, mins: best.mins });
+      const hardWanted = (R.exactMin!=null) || (R.bucket!=null);
+      // Don't force a Not-Flexible student into a time they didn't ask for.
+      if(best.off && R.flexibility==='fixed' && hardWanted){
+        unplaceable.push({ stu, R, nearest: getTeacher(best.teacherId), mins: best.mins, reason:'fixed-miss' });
+      } else {
+        taken.add(best.slot.key);
+        proposals.push({ stu, R, teacherId: best.teacherId, slot: best.slot, mins: best.mins, off: best.off });
+      }
     } else {
       let near=null, nd=Infinity;
       activeTeachers().forEach(t=>{ const {mins}=batchProxMin(si,t,ctx); if(mins<nd){ nd=mins; near=t; } });
-      unplaceable.push({ stu, nearest: near, mins: (nd===Infinity?null:nd), skipped:false });
+      unplaceable.push({ stu, R, nearest: near, mins: (nd===Infinity?null:nd), reason:'no-slot' });
     }
   });
   batchState.proposals = proposals;
@@ -2212,8 +2291,9 @@ function batchAdjust(sel){
   batchState.taken.delete(p.slot.key);
   const key = tid+'|'+dayShort+'|'+t24;
   p.teacherId = tid;
-  p.slot = { dayShort, t24, key, label: dayShort+' '+fmtTime(t24), hourFloat: parseInt(t24)+parseInt(t24.split(':')[1])/60 };
-  p.timeMiss = false;
+  const slotMin = parseInt(t24)*60 + parseInt(t24.split(':')[1]);
+  p.slot = { dayShort, t24, key, slotMin, label: dayShort+' '+fmtTime(t24), hourFloat: slotMin/60 };
+  p.off = slotTimeFit(resolveStudent(p.stu), p.slot) > 0;
   batchState.taken.add(key);
   const si = batchState.ctx ? batchState.ctx.studentOriginIdx[p.stu.id] : null;
   const t2 = getTeacher(tid);
@@ -2225,7 +2305,7 @@ function batchSkip(i){
   const p = batchState.proposals[i];
   if(!p) return;
   batchState.taken.delete(p.slot.key);
-  batchState.unplaceable.push({ stu: p.stu, nearest: getTeacher(p.teacherId), mins: p.mins, skipped:true });
+  batchState.unplaceable.push({ stu: p.stu, R: p.R, nearest: getTeacher(p.teacherId), mins: p.mins, reason:'skipped' });
   batchState.proposals.splice(i,1);
   renderBatchResults();
 }
@@ -2247,32 +2327,34 @@ function renderBatchResults(){
         <div class="card-title" style="margin-bottom:0">Review assignments (${batchState.proposals.length})</div>
         <button class="btn btn-teal btn-sm" onclick="batchConfirmAll()">✓ Confirm all & save</button>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Each match is the closest available provider by real drive time. Use the dropdown to move anyone before saving.</div>`;
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Matched to each student's requested day &amp; time first, then the nearest provider. Use the dropdown to move anyone before saving.</div>`;
     html += batchState.proposals.map((p,i)=>{
       const t = getTeacher(p.teacherId);
+      const R = p.R || resolveStudent(p.stu);
       // recompute candidates against current locks, freeing this student's own slot
       const si = batchState.ctx ? batchState.ctx.studentOriginIdx[p.stu.id] : null;
       const tExcl = new Set(batchState.taken); tExcl.delete(p.slot.key);
-      const cands = (batchState.ctx && si!=null) ? batchMatchStudent(p.stu, si, tExcl, batchState.ctx).slice(0,12) : [];
+      const cands = (batchState.ctx && si!=null) ? batchMatchStudent(p.stu, si, tExcl, batchState.ctx).slice(0,14) : [];
       const opts = cands.map(c=>{
         const v = `${i}@@${c.teacherId}@@${c.slot.dayShort}@@${c.slot.t24}`;
         const isCur = String(c.teacherId)===String(p.teacherId) && c.slot.key===p.slot.key;
-        return `<option value="${v}"${isCur?' selected':''}>${c.teacherName} — ${c.slot.label} (~${c.mins} min)${c.timeMiss?' off-pref':''}</option>`;
+        return `<option value="${v}"${isCur?' selected':''}>${c.teacherName} — ${c.slot.label} (~${c.mins} min)${c.off?' · off-pref':''}</option>`;
       }).join('');
       const driveLabel = (p.mins!=null) ? `~${p.mins} min drive` : '';
+      const tch = R.teacherReq ? (getTeacher(R.teacherReq)?' · wants '+fullName(getTeacher(R.teacherReq)):'') : '';
       return `<div style="padding:9px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
           <div style="min-width:0">
-            <div style="font-weight:500;font-size:13px;color:var(--navy)">${p.stu.name} ${flexBadge(p.stu.flexibility)}</div>
+            <div style="font-weight:500;font-size:13px;color:var(--navy)">${p.stu.name} ${flexBadge(R.flexibility)}</div>
             <div style="font-size:12px;color:var(--muted)">${p.stu.address}</div>
-            ${p.stu.notes?`<div style="font-size:11px;color:var(--muted)">📝 ${p.stu.notes}</div>`:''}
+            <div style="font-size:11px;color:var(--muted)">Requested: ${prefDesc(R)}${tch}${R.notes?' · 📝 '+R.notes:''}</div>
           </div>
           <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="batchSkip(${i})">Skip</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
           <span style="font-size:12px;color:var(--navy)">→ ${fullName(t)}, <strong>${p.slot.label}</strong>${driveLabel?` · ${driveLabel}`:''}</span>
-          ${p.timeMiss?'<span style="font-size:11px;color:#8a5e10;background:rgba(200,134,26,0.14);padding:1px 7px;border-radius:8px">outside preferred time</span>':''}
-          <select class="form-select" style="max-width:300px;font-size:12px;padding:4px 8px" onchange="batchAdjust(this)">${opts}</select>
+          ${p.off?'<span style="font-size:11px;color:#8a5e10;background:rgba(200,134,26,0.14);padding:1px 7px;border-radius:8px">not their requested time</span>':''}
+          <select class="form-select" style="max-width:320px;font-size:12px;padding:4px 8px" onchange="batchAdjust(this)">${opts}</select>
         </div>
       </div>`;
     }).join('') + '</div>';
@@ -2285,10 +2367,16 @@ function renderBatchResults(){
     html += batchState.unplaceable.map(u=>{
       const near = u.nearest ? fullName(u.nearest) : '—';
       const dist = (u.mins!=null) ? `~${u.mins} min` : '';
+      const R = u.R || resolveStudent(u.stu);
+      let why = '';
+      if(u.reason==='fixed-miss') why = `wanted ${prefDesc(R)} · not flexible — that time wasn't open`;
+      else if(u.reason==='no-slot') why = `no opening on ${R.days.length?R.days.join('/'):'requested day'}`;
+      else if(u.reason==='skipped') why = 'skipped — handle manually';
+      else why = `wanted ${prefDesc(R)}`;
       return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
-        <div style="font-weight:500;font-size:13px;color:var(--navy)">${u.stu.name} ${flexBadge(u.stu.flexibility)}${u.skipped?' <span style="font-size:11px;color:var(--muted)">(skipped)</span>':''}</div>
+        <div style="font-weight:500;font-size:13px;color:var(--navy)">${u.stu.name} ${flexBadge(R.flexibility)}</div>
         <div style="font-size:12px;color:var(--muted)">${u.stu.address}</div>
-        <div style="font-size:11px;color:var(--muted)">Closest: ${near}${dist?' · '+dist:''}${u.stu.prefDay?' · wanted '+u.stu.prefDay:''}${u.stu.notes?' · 📝 '+u.stu.notes:''}</div>
+        <div style="font-size:11px;color:var(--muted)">${why} · Closest: ${near}${dist?' ('+dist+')':''}${R.notes?' · 📝 '+R.notes:''}</div>
       </div>`;
     }).join('') + '</div>';
   }
@@ -2302,11 +2390,12 @@ async function batchConfirmAll(){
   for(const p of batchState.proposals){
     const t = getTeacher(p.teacherId);
     if(!t) continue;
-    const apt = { day: p.slot.dayShort, time: p.slot.t24, address: p.stu.address, name: p.stu.name, notes: p.stu.notes||'', flexibility: p.stu.flexibility||'' };
+    const R = p.R || resolveStudent(p.stu);
+    const apt = { day: p.slot.dayShort, time: p.slot.t24, address: p.stu.address, name: p.stu.name, notes: R.notes||'', flexibility: R.flexibility||'' };
     const saved = await dbSaveAppointment(p.teacherId, apt);
     if(saved) apt._id = saved.id;
     t.students.push(apt);
-    logRequest({ clientName: p.stu.name, clientAddress: p.stu.address, providerName: fullName(t), slot: p.slot.label, status:'placed', notes: p.stu.notes||'' });
+    logRequest({ clientName: p.stu.name, clientAddress: p.stu.address, providerName: fullName(t), slot: p.slot.label, status:'placed', notes: R.notes||'' });
     placed.push(p.stu.id);
   }
   const n = placed.length;
