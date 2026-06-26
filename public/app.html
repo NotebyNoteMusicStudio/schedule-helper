@@ -456,9 +456,9 @@ body {
     <!-- ── PLACEMENT ── -->
     <div id="view-placement" class="view content">
       <div class="section-label" style="margin-bottom:1.25rem">Schedule a New <span data-cfg="clientSingle">Client</span></div>
-      <div style="display:flex;gap:6px;margin-bottom:1.25rem">
-        <button id="pmode_single" class="solo-tab active" onclick="showPlacementMode('single')">One at a time</button>
-        <button id="pmode_batch" class="solo-tab" onclick="showPlacementMode('batch')">Batch (multiple)</button>
+      <div style="display:flex;gap:8px;margin-bottom:1.25rem">
+        <button id="pmode_single" class="btn btn-sm btn-teal" onclick="showPlacementMode('single')">One at a time</button>
+        <button id="pmode_batch" class="btn btn-sm btn-ghost" onclick="showPlacementMode('batch')">Batch (multiple)</button>
       </div>
       <div id="placement_single">
       <div class="grid-2" style="align-items:start">
@@ -488,8 +488,8 @@ body {
                   <option value="">Any time</option>
                   <option>Morning (8am–12pm)</option>
                   <option>Afternoon (12pm–4pm)</option>
-                  <option>After school (3pm–6pm)</option>
-                  <option>Evening (6pm–8pm)</option>
+                  <option>After school (2pm–5pm)</option>
+                  <option>Evening (4:30pm–8pm)</option>
                 </select>
               </div>
             </div>
@@ -507,7 +507,7 @@ body {
               <label class="form-label"><label class="form-label" data-cfg="serviceField" style="display:contents">Service type</label>
               <input class="form-input" id="p_instrument" placeholder="e.g. Cleaning, tutoring, dog walking…" />
             </div>
-            <button class="btn btn-teal" onclick="runPlacement()">Find best provider →</button>
+            <button class="btn btn-teal" id="findBestBtn" onclick="runPlacement()">Find best provider →</button>
           </div>
         </div>
         <div>
@@ -560,7 +560,7 @@ body {
                   <div><label class="form-label">Flexibility</label>
                     <select class="form-select" id="bf_flex">
                       <option value="">—</option><option value="flexible">Flexible</option>
-                      <option value="somewhat">Somewhat</option><option value="fixed">Fixed</option>
+                      <option value="somewhat">Somewhat</option><option value="fixed">Not Flexible</option>
                     </select>
                   </div>
                 </div>
@@ -1663,7 +1663,7 @@ async function runPlacement() {
   const buffer = parseInt(document.getElementById('p_buffer')?.value || '15', 10);
 
   // Show searching state
-  const btn = document.querySelector('#placement_mobile .btn-teal');
+  const btn = document.getElementById('findBestBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Finding...'; }
   document.getElementById('placementResults').innerHTML = '<div class="empty" style="border:1px dashed var(--border);border-radius:10px"><div style="font-size:24px;margin-bottom:8px">🔍</div>Calculating drive times...</div>';
 
@@ -1731,7 +1731,7 @@ async function runPlacement() {
 
   const TIME_RANGES = {
     'Morning (8am–12pm)': [8,12], 'Afternoon (12pm–4pm)': [12,16],
-    'After school (3pm–6pm)': [15,18], 'Evening (6pm–8pm)': [18,20], '': [0,24]
+    'After school (2pm–5pm)': [14,17], 'Evening (4:30pm–8pm)': [16.5,20], '': [0,24]
   };
 
   const results = [];
@@ -1802,9 +1802,10 @@ async function runPlacement() {
       const [tStart, tEnd] = TIME_RANGES[prefTime] || [0,24];
       const matches = slotList.filter(s => {
         const parts = s.label.split(' ');
-        let h = parseInt(parts[1]); const ap = parts[2];
+        let [h,m] = parts[1].split(':').map(Number); const ap = parts[2];
         if (ap==='PM'&&h!==12) h+=12; if(ap==='AM'&&h===12) h=0;
-        return h >= tStart && h < tEnd;
+        const hf = h + (m||0)/60;
+        return hf >= tStart && hf < tEnd;
       });
       if (!matches.length) timePenalty = 20;
     }
@@ -1819,7 +1820,7 @@ async function runPlacement() {
 
   results.sort((a,b) => a.score - b.score);
 
-  if (btn) { btn.disabled = false; btn.textContent = 'Find best provider →'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Find best ' + singular(cfg.workerLabel).toLowerCase() + ' →'; }
 
   const el = document.getElementById('placementResults');
   if (!results.length) {
@@ -1904,13 +1905,14 @@ const batchState = { students: [], proposals: [], unplaceable: [], taken: new Se
 function flexBadge(f){
   if(f==='flexible') return '<span style="font-size:11px;color:#2D7A5F;background:rgba(45,122,95,0.12);padding:1px 7px;border-radius:8px">Flexible</span>';
   if(f==='somewhat') return '<span style="font-size:11px;color:#8a5e10;background:rgba(200,134,26,0.14);padding:1px 7px;border-radius:8px">Somewhat</span>';
-  if(f==='fixed') return '<span style="font-size:11px;color:#9B2C2C;background:rgba(155,44,44,0.10);padding:1px 7px;border-radius:8px">Fixed</span>';
+  if(f==='fixed') return '<span style="font-size:11px;color:#9B2C2C;background:rgba(155,44,44,0.10);padding:1px 7px;border-radius:8px">Not Flexible</span>';
   return '<span style="font-size:11px;color:var(--muted)">—</span>';
 }
 
 function showPlacementMode(mode){
-  document.getElementById('pmode_single').classList.toggle('active', mode==='single');
-  document.getElementById('pmode_batch').classList.toggle('active', mode==='batch');
+  const s = document.getElementById('pmode_single'), b = document.getElementById('pmode_batch');
+  if(s) s.className = 'btn btn-sm ' + (mode==='single' ? 'btn-teal' : 'btn-ghost');
+  if(b) b.className = 'btn btn-sm ' + (mode==='batch' ? 'btn-teal' : 'btn-ghost');
   document.getElementById('placement_single').classList.toggle('hidden', mode!=='single');
   document.getElementById('placement_batch').classList.toggle('hidden', mode!=='batch');
   if(mode==='batch') batchPopulateTeachers();
@@ -2045,9 +2047,9 @@ function renderBatchQueue(){
 function batchTimeRange(prefTime){
   const p = (prefTime||'').toLowerCase();
   if(p.includes('morning')) return [8,12];
-  if(p.includes('after school')||p.includes('after-school')||p.includes('afterschool')) return [15,18];
+  if(p.includes('after school')||p.includes('after-school')||p.includes('afterschool')) return [14,17];
   if(p.includes('afternoon')) return [12,16];
-  if(p.includes('evening')) return [18,20];
+  if(p.includes('evening')) return [16.5,20];
   return [0,24];
 }
 
@@ -2891,6 +2893,9 @@ function applySettings() {
       btn.textContent = '+ Schedule';
     }
   });
+  // "Find best provider" button reflects the worker label
+  const fbBtn = document.getElementById('findBestBtn');
+  if (fbBtn) fbBtn.textContent = 'Find best ' + singular(cfg.workerLabel).toLowerCase() + ' →';
   // Schedule table headers
   const swh = document.getElementById('sch_workerHead');
   const sch = document.getElementById('sch_clientHead');
@@ -3021,13 +3026,14 @@ function runLocationPlacement() {
     if (prefTime && slotList.length) {
       const matches = slotList.filter(s => {
         const parts = s.split(' ');
-        const h = parseInt(parts[1]);
+        let [h,m] = parts[1].split(':').map(Number);
         const ap = parts[2];
         let h24 = h; if (ap==='PM' && h!==12) h24+=12; if (ap==='AM' && h===12) h24=0;
+        h24 += (m||0)/60;
         if (prefTime.includes('Morning')) return h24>=8&&h24<12;
         if (prefTime.includes('Afternoon')) return h24>=12&&h24<16;
-        if (prefTime.includes('After school')) return h24>=15&&h24<18;
-        if (prefTime.includes('Evening')) return h24>=18;
+        if (prefTime.includes('After school')) return h24>=14&&h24<17;
+        if (prefTime.includes('Evening')) return h24>=16.5;
         return true;
       });
       if (!matches.length) { score -= 20; timePenalty = 20; }
@@ -3308,7 +3314,7 @@ async function runSoloPlacement() {
   if (btn) { btn.disabled = true; btn.textContent = soloState.mode==='mobile' ? 'Calculating drive times…' : 'Placing…'; }
 
   const TIME_RANGES = {
-    'Morning': [8,12], 'Afternoon': [12,16], 'After school': [15,18], 'Evening': [18,20], '': [0,24], 'Any': [0,24]
+    'Morning': [8,12], 'Afternoon': [12,16], 'After school': [14,17], 'Evening': [16.5,20], '': [0,24], 'Any': [0,24]
   };
   const dur = cfg.apptDuration;
   const buffer = parseInt(document.getElementById('solo_buffer')?.value || '15', 10);
@@ -3348,7 +3354,7 @@ async function runSoloPlacement() {
     let pool = openSlots.filter(s => {
       if (s.taken) return false;
       if (client.prefDay && s.day !== client.prefDay) return false;
-      const h = parseInt(s.time.split(':')[0]);
+      const h = parseInt(s.time.split(':')[0]) + parseInt(s.time.split(':')[1]||0)/60;
       if (client.prefTime && (h < tStart || h >= tEnd)) return false;
       return true;
     });
@@ -3358,7 +3364,7 @@ async function runSoloPlacement() {
       // Try without day preference
       pool = openSlots.filter(s => {
         if (s.taken) return false;
-        const h = parseInt(s.time.split(':')[0]);
+        const h = parseInt(s.time.split(':')[0]) + parseInt(s.time.split(':')[1]||0)/60;
         if (client.prefTime && (h < tStart || h >= tEnd)) return false;
         return true;
       });
