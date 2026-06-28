@@ -1016,19 +1016,19 @@ body {
       <div class="card-title">Your availability windows</div>
       <p class="hint" style="margin-bottom:1rem">Add the days and time ranges you're available for new clients.</p>
       <div id="tv_avail"></div>
-      <div style="display:grid;grid-template-columns:120px 100px 100px auto;gap:8px;align-items:end;margin-top:10px">
-        <div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px">
+        <div style="flex:1;min-width:130px">
           <label class="form-label">Day</label>
           <select class="form-select" id="tv_newDay">
             <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
             <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
           </select>
         </div>
-        <div>
+        <div style="width:130px">
           <label class="form-label">From</label>
           <input class="form-input" type="time" id="tv_from" value="15:00" />
         </div>
-        <div>
+        <div style="width:130px">
           <label class="form-label">To</label>
           <input class="form-input" type="time" id="tv_to" value="18:00" />
         </div>
@@ -1048,23 +1048,23 @@ body {
         <span></span>
       </div>
       <div id="tv_students"></div>
-      <div style="display:grid;grid-template-columns:60px 80px 1fr 90px auto;gap:8px;align-items:end;margin-top:10px">
-        <div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px">
+        <div style="width:90px">
           <label class="form-label">Day</label>
           <select class="form-select" id="tv_sDay" style="padding:6px 8px;font-size:12px">
             <option value="Mon">Mon</option><option value="Tue">Tue</option><option value="Wed">Wed</option>
             <option value="Thu">Thu</option><option value="Fri">Fri</option><option value="Sat">Sat</option><option value="Sun">Sun</option>
           </select>
         </div>
-        <div>
+        <div style="width:130px">
           <label class="form-label">Time</label>
           <input class="form-input" type="time" id="tv_sTime" value="16:00" style="padding:6px 8px;font-size:12px" />
         </div>
-        <div>
+        <div style="flex:1;min-width:150px">
           <label class="form-label">Address</label>
           <input class="form-input" id="tv_sAddr" placeholder="123 Main St" style="font-size:12px" />
         </div>
-        <div>
+        <div style="flex:1;min-width:130px">
           <label class="form-label">Name</label>
           <input class="form-input" id="tv_sName" placeholder="Client name" style="font-size:12px" />
         </div>
