@@ -917,13 +917,13 @@ body {
 <div id="modal-cancelSub" class="modal-bg hidden">
   <div class="modal" style="max-width:420px">
     <div class="modal-title" style="color:#991b1b">Cancel subscription</div>
-    <p style="font-size:14px;color:var(--ink);margin-bottom:8px">Are you sure? Your schedule data will be lost when access ends.</p>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:1.25rem">We'll send a confirmation to <strong id="cancel_email"></strong> and process within one business day.</p>
+    <p style="font-size:14px;color:var(--ink);margin-bottom:8px">We'll take you to a short cancellation form.</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:1.25rem">You'll keep full access until the end of your current paid period.</p>
     <div id="cancel_error" style="font-size:13px;color:#991b1b;margin-bottom:10px;display:none"></div>
     <div id="cancel_success" style="font-size:13px;color:#2d7a5f;background:rgba(45,122,95,0.08);border:1px solid rgba(45,122,95,0.2);border-radius:7px;padding:10px 12px;margin-bottom:10px;display:none"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('modal-cancelSub')">Keep my subscription</button>
-      <button class="btn btn-danger-ghost" id="cancel_confirm_btn" onclick="submitCancelRequest()">Yes, cancel</button>
+      <button class="btn btn-danger-ghost" id="cancel_confirm_btn" onclick="submitCancelRequest()">Continue to form</button>
     </div>
   </div>
 </div>
@@ -4499,7 +4499,7 @@ function openCancelModal() {
   document.getElementById('cancel_error').style.display = 'none';
   document.getElementById('cancel_success').style.display = 'none';
   const btn = document.getElementById('cancel_confirm_btn');
-  if (btn) { btn.disabled = false; btn.textContent = 'Yes, cancel'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Continue to form'; }
   document.getElementById('modal-cancelSub').classList.remove('hidden');
 }
 
@@ -4507,23 +4507,23 @@ async function submitCancelRequest() {
   const btn = document.getElementById('cancel_confirm_btn');
   const errEl = document.getElementById('cancel_error');
   const okEl = document.getElementById('cancel_success');
-  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
   errEl.style.display = 'none';
   try {
-    // Send cancellation request email via mailto as fallback — or via a simple API call
-    const email = currentUser?.email || 'unknown';
-    const bizName = cfg.bizName || 'Unknown business';
-    const subject = encodeURIComponent('Cancellation Request — Schedule Helper');
-    const body = encodeURIComponent(`Cancellation request received.\n\nEmail: ${email}\nBusiness: ${bizName}\nRequested at: ${new Date().toLocaleString()}\n\nPlease process this cancellation and confirm by reply.`);
-    // Open email client as the notification mechanism
-    window.open(`mailto:support@theschedulehelper.com?subject=${subject}&body=${body}`);
-    okEl.textContent = `Cancellation request sent to support@theschedulehelper.com. We'll confirm within one business day.`;
+    // Open the cancellation form in a new tab, pre-filling what we can.
+    const email = currentUser?.email || '';
+    const bizName = cfg.bizName || '';
+    const url = 'https://trytheschedulehelper.com/cancel-subscription'
+      + '?email=' + encodeURIComponent(email)
+      + '&business=' + encodeURIComponent(bizName);
+    window.open(url, '_blank');
+    okEl.textContent = 'The cancellation form opened in a new tab. Fill it out there and we\u2019ll confirm within one business day. You keep full access until your paid period ends.';
     okEl.style.display = 'block';
-    if (btn) btn.textContent = 'Request sent';
+    if (btn) btn.textContent = 'Form opened';
   } catch(e) {
-    errEl.textContent = 'Something went wrong. Please email support@theschedulehelper.com directly.';
+    errEl.textContent = 'Couldn\u2019t open the form. Please visit trytheschedulehelper.com/cancel-subscription or email support@theschedulehelper.com.';
     errEl.style.display = 'block';
-    if (btn) { btn.disabled = false; btn.textContent = 'Yes, cancel'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Continue to form'; }
   }
 }
 
@@ -4856,17 +4856,19 @@ function hideLoading() {
   await resolveDataOwner();
   await resolveAccess();
 
-  // ── Periodic subscription check (force-stop if cancelled mid-session) ──
-  // Checks every 5 minutes. If status flips to inactive, signs out immediately.
+  // ── Periodic access check (force-stop when access truly ends) ──
+  // Uses the subscription-status API, which honors the grace period (access_until):
+  // a cancelled user keeps access until their paid period ends, then is signed out.
   async function checkSubscriptionActive() {
     try {
       const { data: { session: s } } = await sb.auth.getSession();
       if (!s) { window.location.href = '/'; return; }
-      const { data: profile } = await sb.from('profiles')
-        .select('subscription_status')
-        .eq('id', currentUser.id)
-        .single();
-      if (profile && profile.subscription_status !== 'active') {
+      const resp = await fetch('/api/subscription-status', {
+        headers: { 'Authorization': 'Bearer ' + s.access_token }
+      });
+      if (!resp.ok) return; // network/API hiccup — try again next interval
+      const data = await resp.json();
+      if (!data.active) {
         await sb.auth.signOut();
         window.location.href = '/?cancelled=1';
       }
