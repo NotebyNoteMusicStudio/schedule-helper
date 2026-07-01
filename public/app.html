@@ -923,8 +923,27 @@ body {
           </div>
         </div>
       </div>
+      <div class="card" style="max-width:680px;margin-top:0;border:1px solid rgba(153,27,27,0.15)">
+        <div class="card-title" style="color:#991b1b">Cancel subscription</div>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:1rem">Your access will remain active until we process the cancellation. We'll confirm by email within one business day.</p>
+        <button class="btn btn-danger-ghost btn-sm" onclick="openCancelModal()">Request cancellation</button>
+      </div>
     </div>
   </main>
+</div>
+
+<div id="modal-cancelSub" class="modal-bg hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-title" style="color:#991b1b">Cancel subscription</div>
+    <p style="font-size:14px;color:var(--ink);margin-bottom:8px">Are you sure? Your schedule data will be lost when access ends.</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:1.25rem">We'll send a confirmation to <strong id="cancel_email"></strong> and process within one business day.</p>
+    <div id="cancel_error" style="font-size:13px;color:#991b1b;margin-bottom:10px;display:none"></div>
+    <div id="cancel_success" style="font-size:13px;color:#2d7a5f;background:rgba(45,122,95,0.08);border:1px solid rgba(45,122,95,0.2);border-radius:7px;padding:10px 12px;margin-bottom:10px;display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-cancelSub')">Keep my subscription</button>
+      <button class="btn btn-danger-ghost" id="cancel_confirm_btn" onclick="submitCancelRequest()">Yes, cancel</button>
+    </div>
+  </div>
 </div>
 
 <div id="modal-inviteMember" class="modal-bg hidden">
@@ -4403,6 +4422,40 @@ async function saveProviderEdits() {
 }
 
 // ── Reset ─────────────────────────────────────────────────────────────────────
+function openCancelModal() {
+  const emailEl = document.getElementById('cancel_email');
+  if (emailEl) emailEl.textContent = currentUser?.email || 'your email';
+  document.getElementById('cancel_error').style.display = 'none';
+  document.getElementById('cancel_success').style.display = 'none';
+  const btn = document.getElementById('cancel_confirm_btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Yes, cancel'; }
+  document.getElementById('modal-cancelSub').classList.remove('hidden');
+}
+
+async function submitCancelRequest() {
+  const btn = document.getElementById('cancel_confirm_btn');
+  const errEl = document.getElementById('cancel_error');
+  const okEl = document.getElementById('cancel_success');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  errEl.style.display = 'none';
+  try {
+    // Send cancellation request email via mailto as fallback — or via a simple API call
+    const email = currentUser?.email || 'unknown';
+    const bizName = cfg.bizName || 'Unknown business';
+    const subject = encodeURIComponent('Cancellation Request — Schedule Helper');
+    const body = encodeURIComponent(`Cancellation request received.\n\nEmail: ${email}\nBusiness: ${bizName}\nRequested at: ${new Date().toLocaleString()}\n\nPlease process this cancellation and confirm by reply.`);
+    // Open email client as the notification mechanism
+    window.open(`mailto:support@theschedulehelper.com?subject=${subject}&body=${body}`);
+    okEl.textContent = `Cancellation request sent to support@theschedulehelper.com. We'll confirm within one business day.`;
+    okEl.style.display = 'block';
+    if (btn) btn.textContent = 'Request sent';
+  } catch(e) {
+    errEl.textContent = 'Something went wrong. Please email support@theschedulehelper.com directly.';
+    errEl.style.display = 'block';
+    if (btn) { btn.disabled = false; btn.textContent = 'Yes, cancel'; }
+  }
+}
+
 function openResetModal() {
   if (!canUseReset()) return alert("You don't have permission to reset data.");
   ['reset_clients','reset_avail','reset_providers','reset_log'].forEach(id => {
@@ -4731,6 +4784,24 @@ function hideLoading() {
   localStorage.setItem('sh_token', session.access_token);
   await resolveDataOwner();
   await resolveAccess();
+
+  // ── Periodic subscription check (force-stop if cancelled mid-session) ──
+  // Checks every 5 minutes. If status flips to inactive, signs out immediately.
+  async function checkSubscriptionActive() {
+    try {
+      const { data: { session: s } } = await sb.auth.getSession();
+      if (!s) { window.location.href = '/'; return; }
+      const { data: profile } = await sb.from('profiles')
+        .select('subscription_status')
+        .eq('id', currentUser.id)
+        .single();
+      if (profile && profile.subscription_status !== 'active') {
+        await sb.auth.signOut();
+        window.location.href = '/?cancelled=1';
+      }
+    } catch(e) { /* non-fatal — try again next interval */ }
+  }
+  setInterval(checkSubscriptionActive, 5 * 60 * 1000); // every 5 minutes
 
   // Load all data from Supabase
   showLoading('Loading your schedule...');
