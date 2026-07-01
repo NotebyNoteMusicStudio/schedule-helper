@@ -152,6 +152,20 @@ body {
     // Remove signout param from URL without reload
     history.replaceState({}, '', '/');
   }
+  if (new URLSearchParams(window.location.search).get('cancelled') === '1') {
+    history.replaceState({}, '', '/');
+    // Show message after DOM loads
+    window.addEventListener('DOMContentLoaded', () => {
+      const el = document.getElementById('signin-error');
+      if (el) {
+        el.textContent = 'Your subscription has been cancelled and your access has ended. Questions? Email us at support@theschedulehelper.com';
+        el.style.display = 'block';
+        el.style.background = 'rgba(180,100,0,0.08)';
+        el.style.borderColor = 'rgba(180,100,0,0.25)';
+        el.style.color = '#92400e';
+      }
+    });
+  }
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
