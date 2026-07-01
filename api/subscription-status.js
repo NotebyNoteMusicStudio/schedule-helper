@@ -1,5 +1,7 @@
 // api/subscription-status.js
-// Checks if user has active access (granted via GHL purchase webhook)
+// Checks if user has access. Access is granted when:
+//   - subscription_status === 'active', OR
+//   - they cancelled but are still inside their paid period (today < access_until)
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -19,17 +21,23 @@ module.exports = async (req, res) => {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('subscription_status, access_granted_at, ghl_contact_id')
+    .select('subscription_status, access_granted_at, access_until, ghl_contact_id, business_type')
     .eq('id', user.id)
     .single();
 
   if (!profile) return res.json({ active: false, reason: 'No profile found' });
 
-  const active = profile.subscription_status === 'active';
+  // Grace period: a cancelled user keeps access until access_until passes.
+  const now = new Date();
+  const withinGrace = profile.access_until && new Date(profile.access_until) > now;
+  const active = profile.subscription_status === 'active' || withinGrace;
+
   return res.json({
     active,
     status: profile.subscription_status,
     accessGrantedAt: profile.access_granted_at,
+    accessUntil: profile.access_until || null,
+    inGracePeriod: !!(withinGrace && profile.subscription_status !== 'active'),
     hasGHLContact: !!profile.ghl_contact_id,
     businessType: profile.business_type || null
   });
