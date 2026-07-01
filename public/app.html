@@ -2353,6 +2353,79 @@ function batchMatchStudent(stu, si, taken, ctx, placed){
   return cands;
 }
 
+// Normalize an address for sibling detection (same street address = likely same family).
+function normAddr(a){
+  return (a||'').toLowerCase().replace(/[.,#]/g,' ').replace(/\s+/g,' ').trim();
+}
+
+// Group queued students into families by shared address. Returns Map(addrKey -> [students]).
+function groupFamilies(students){
+  const fam = new Map();
+  students.forEach(s=>{
+    const key = normAddr(s.address);
+    if(!key) return;
+    if(!fam.has(key)) fam.set(key, []);
+    fam.get(key).push(s);
+  });
+  return fam;
+}
+
+// Place a whole family back-to-back with one provider, starting from the first member's best slot.
+// Keeps siblings on the same day + provider, consecutive (drive-time 0 between them since same address).
+function batchPlaceFamily(members, taken, ctx, placed, origIndex){
+  const dur = cfg.apptDuration;
+  // Anchor on the most-constrained member (exact time first) so the family lands near a real request.
+  const ranked = members.map(stu=>({ stu, si: ctx.studentOriginIdx[stu.id], R: resolveStudent(stu) }));
+  ranked.sort((a,b)=> (a.R.exactMin!=null?0:(a.R.bucket?1:2)) - (b.R.exactMin!=null?0:(b.R.bucket?1:2)));
+  const results = [];
+  const anchor = ranked[0];
+  const first = batchPlaceOne(anchor.stu, anchor.si, anchor.R, taken, ctx, placed, origIndex[anchor.stu.id]);
+  results.push(first);
+  if(!first.proposal){
+    // Anchor couldn't be placed — fall back to placing each member individually.
+    ranked.slice(1).forEach(m=> results.push(batchPlaceOne(m.stu, m.si, m.R, taken, ctx, placed, origIndex[m.stu.id])));
+    return results;
+  }
+  first.proposal.family = true;
+  const tid = first.proposal.teacherId;
+  const day = first.proposal.slot.dayShort;
+  const t = getTeacher(tid);
+  let nextMin = first.proposal.slot.slotMin + dur; // back-to-back, no drive (same address)
+  // Place remaining siblings immediately after, same provider/day.
+  ranked.slice(1).forEach(m=>{
+    const winEnd = getDayWindowEnd(t, day);
+    let slotMin = nextMin;
+    // find first open consecutive slot on that day for this provider
+    const dayList = (placed.byDay[tid+'|'+day]||[]).slice().sort((x,y)=>x.min-y.min);
+    while(slotMin + dur <= winEnd && dayList.some(e=> slotMin < e.min+dur && e.min < slotMin+dur)) slotMin += dur;
+    if(slotMin + dur > winEnd){
+      // No consecutive room — place this sibling normally instead of failing.
+      results.push(batchPlaceOne(m.stu, m.si, m.R, taken, ctx, placed, origIndex[m.stu.id]));
+      return;
+    }
+    const t24 = String(Math.floor(slotMin/60)).padStart(2,'0')+':'+String(slotMin%60).padStart(2,'0');
+    const key = tid+'|'+day+'|'+t24;
+    taken.add(key);
+    (placed.byDay[tid+'|'+day] = placed.byDay[tid+'|'+day]||[]).push({ min: slotMin, address: m.stu.address||'' });
+    (placed.byProv[tid] = placed.byProv[tid]||[]).push(slotMin);
+    const off = slotTimeFit(m.R, { slotMin, hourFloat: slotMin/60 }) > 0;
+    results.push({ proposal: { stu: m.stu, R: m.R, teacherId: tid, slot: { dayShort: day, t24, key, slotMin, hourFloat: slotMin/60, label: day+' '+fmtTime(t24) }, mins: first.proposal.mins, off, tight: false, family: true, _i: origIndex[m.stu.id] } });
+    nextMin = slotMin + dur;
+  });
+  return results;
+}
+
+// Latest end-minute available for a provider on a given day (across their availability windows).
+function getDayWindowEnd(t, dayShort){
+  let end = 0;
+  (t.availability||[]).forEach(a=>{
+    if(a.day.slice(0,3) !== dayShort) return;
+    const e = parseInt(a.to)*60 + parseInt(a.to.split(':')[1]);
+    if(e > end) end = e;
+  });
+  return end || 1440;
+}
+
 // Place a single student given current locks + clustering picture. Mutates taken/placed.
 function batchPlaceOne(stu, si, R, taken, ctx, placed, origIdx){
   const cands = batchMatchStudent(stu, si, taken, ctx, placed);
@@ -2406,9 +2479,25 @@ async function batchPlaceAll(){
 
   const placed = buildPlaced([], null); // start from existing routes only
   const proposals = [], unplaceable = [];
+
+  // Group siblings (same address) so a family is placed together, back-to-back with one provider.
+  const families = groupFamilies(queue);
+  const doneIds = new Set();
+
   ordered.forEach(({stu, si, R})=>{
-    const res = batchPlaceOne(stu, si, R, taken, ctx, placed, origIndex[stu.id]);
-    if(res.proposal) proposals.push(res.proposal); else unplaceable.push(res.unplaceable);
+    if(doneIds.has(stu.id)) return;
+    const key = normAddr(stu.address);
+    const fam = key ? families.get(key) : null;
+    if(fam && fam.length > 1){
+      // Place the whole family together, anchored on this member's turn in the order.
+      const results = batchPlaceFamily(fam, taken, ctx, placed, origIndex);
+      results.forEach(res=>{ if(res.proposal) proposals.push(res.proposal); else unplaceable.push(res.unplaceable); });
+      fam.forEach(m=>doneIds.add(m.id));
+    } else {
+      const res = batchPlaceOne(stu, si, R, taken, ctx, placed, origIndex[stu.id]);
+      if(res.proposal) proposals.push(res.proposal); else unplaceable.push(res.unplaceable);
+      doneIds.add(stu.id);
+    }
   });
   proposals.sort((a,b)=>a._i-b._i);
   unplaceable.sort((a,b)=>a._i-b._i);
@@ -2557,7 +2646,7 @@ function renderBatchResults(){
       return `<div style="${rowStyle}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
           <div style="min-width:0">
-            <div style="font-weight:500;font-size:13px;color:var(--navy)">${p.stu.name} ${flexBadge(R.flexibility)}${p.manual?` <span style="font-size:11px;color:#fff;background:var(--success);padding:1px 8px;border-radius:8px;font-weight:600">✓ Set to ${p.slot.label}</span>`:''}</div>
+            <div style="font-weight:500;font-size:13px;color:var(--navy)">${p.stu.name} ${flexBadge(R.flexibility)}${p.family?' <span style="font-size:11px;color:#fff;background:var(--teal-dark);padding:1px 8px;border-radius:8px">👨‍👩‍👧 same family</span>':''}${p.manual?` <span style="font-size:11px;color:#fff;background:var(--success);padding:1px 8px;border-radius:8px;font-weight:600">✓ Set to ${p.slot.label}</span>`:''}</div>
             <div style="font-size:12px;color:var(--muted)">${p.stu.address}</div>
             <div style="font-size:11px;color:var(--muted)">Requested: ${prefDesc(R)}${tch}${R.notes?' · 📝 '+R.notes:''}</div>
           </div>
