@@ -4876,6 +4876,25 @@ function hideLoading() {
   }
   setInterval(checkSubscriptionActive, 5 * 60 * 1000); // every 5 minutes
 
+  // ── Grace-period banner: cancelled users see exactly when access ends ──
+  (async () => {
+    try {
+      const resp = await fetch('/api/subscription-status', {
+        headers: { 'Authorization': 'Bearer ' + session.access_token }
+      });
+      if (!resp.ok) return;
+      const d = await resp.json();
+      if (d.inGracePeriod && d.accessUntil) {
+        const end = new Date(d.accessUntil);
+        const dateStr = end.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+        const bar = document.createElement('div');
+        bar.style.cssText = 'background:#FFF7ED;border-bottom:1px solid rgba(194,65,12,0.3);color:#7C2D12;font-size:13px;padding:9px 16px;text-align:center;font-family:\'DM Sans\',sans-serif';
+        bar.innerHTML = 'Your subscription is cancelled. You have full access until <strong>' + dateStr + '</strong>.';
+        document.body.prepend(bar);
+      }
+    } catch(e) { /* banner is best-effort */ }
+  })();
+
   // Load all data from Supabase
   showLoading('Loading your schedule...');
   try {
