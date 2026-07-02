@@ -33,8 +33,14 @@ module.exports = async (req, res) => {
 
   try {
     // ── 1. Check if user already exists ──
-    const { data: existing } = await supabase.auth.admin.listUsers();
-    const alreadyExists = existing?.users?.find(u => u.email === email);
+    // Indexed lookup on profiles — listUsers() is paginated at 50 and misses users at scale,
+    // which would create duplicate accounts.
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .ilike('email', email)
+      .maybeSingle();
+    const alreadyExists = existingProfile ? { id: existingProfile.id } : null;
 
     let userId;
 
@@ -62,11 +68,29 @@ module.exports = async (req, res) => {
       });
 
       if (createError) {
-        console.error('Create user error:', createError.message);
-        return res.status(500).json({ error: createError.message });
+        // Rare edge: auth user exists but has no profile row (e.g. pre-profiles account).
+        // Fall back to a paginated scan of auth users to recover their id.
+        if (/already|registered|exists/i.test(createError.message)) {
+          let found = null, page = 1;
+          while (!found) {
+            const { data: pageData, error: pageErr } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+            if (pageErr || !pageData?.users?.length) break;
+            found = pageData.users.find(u => (u.email || '').toLowerCase() === email.toLowerCase());
+            if (pageData.users.length < 1000) break;
+            page++;
+          }
+          if (!found) {
+            console.error('Create user error (and fallback scan failed):', createError.message);
+            return res.status(500).json({ error: createError.message });
+          }
+          userId = found.id;
+        } else {
+          console.error('Create user error:', createError.message);
+          return res.status(500).json({ error: createError.message });
+        }
+      } else {
+        userId = newUser.user.id;
       }
-
-      userId = newUser.user.id;
 
       // ── 3. Save profile ──
       await supabase.from('profiles').upsert({
