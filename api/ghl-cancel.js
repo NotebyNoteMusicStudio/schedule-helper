@@ -39,14 +39,19 @@ module.exports = async (req, res) => {
   if (!email) return res.status(400).json({ error: 'Email required' });
 
   try {
-    // Find the Supabase user by email
-    const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
-    if (listError) throw listError;
-    const user = users.find(u => u.email === email);
-    if (!user) {
+    // Find the user via the profiles table (indexed lookup — scales to any user count;
+    // auth.admin.listUsers() is paginated at 50 and silently misses users beyond page 1).
+    const { data: profileRow, error: findError } = await supabase
+      .from('profiles')
+      .select('id, email')
+      .ilike('email', email)
+      .maybeSingle();
+    if (findError) throw findError;
+    if (!profileRow) {
       console.warn('Cancel webhook: no user found for', email);
       return res.json({ success: true, message: 'No account found — nothing to revoke' });
     }
+    const user = { id: profileRow.id, email: profileRow.email };
 
     // Parse the paid-through date, if GHL sent one
     let untilDate = null;
