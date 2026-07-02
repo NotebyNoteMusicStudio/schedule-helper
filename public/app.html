@@ -571,7 +571,16 @@ body {
 
               <div id="batch_paste" class="hidden">
                 <p class="hint" style="margin-bottom:8px">One per line: <code style="background:var(--cream-dark);padding:1px 5px;border-radius:4px">Name, Address, Day &amp; time, Flexibility, Notes</code>. Day/time can be natural — "Tue 4pm", "Mon or Wed after school", "Tuesday 4:30". Flexibility reads "not flexible" / "somewhat" / "flexible". Naming a provider ("wants Sarah") routes to them.</p>
-                <textarea class="paste-area" id="batch_pasteText" placeholder="Sarah Jones, 123 Oak St Seattle WA, Tue 4pm, Not flexible, Really wants that spot&#10;Mike Chen, 456 Pine Ave Seattle WA, Tue or Wed, Flexible, fine during summer&#10;Lisa Park, 789 Elm St Seattle WA, any time, Flexible, wants Sarah"></textarea>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                  <span style="font-size:12px;color:var(--muted)">If a line doesn't say, treat as:</span>
+                  <select class="form-select" id="batch_defaultFlex" style="width:auto;font-size:12px;padding:4px 8px" onchange="batchUpdatePreview()">
+                    <option value="flexible" selected>Flexible</option>
+                    <option value="somewhat">Somewhat flexible</option>
+                    <option value="fixed">Not flexible</option>
+                  </select>
+                </div>
+                <textarea class="paste-area" id="batch_pasteText" oninput="batchUpdatePreview()" placeholder="Sarah Jones, 123 Oak St Seattle WA, Tue 4pm, Not flexible, Really wants that spot&#10;Mike Chen, 456 Pine Ave Seattle WA, Tue or Wed, Flexible, fine during summer&#10;Lisa Park, 789 Elm St Seattle WA, any time, Flexible, wants Sarah"></textarea>
+                <div id="batch_pastePreview" style="margin-top:8px"></div>
                 <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="batchParsePaste()">Import list</button>
               </div>
 
@@ -1974,23 +1983,59 @@ function batchAddForm(){
   renderBatchQueue();
 }
 
+// Parse one pasted/CSV line into a student, applying the default flexibility
+// only when the line doesn't state one itself.
+function batchLineToStudent(p, rawLine){
+  const defFlex = document.getElementById('batch_defaultFlex')?.value || 'flexible';
+  const statedFlex = parseFlexFromText(rawLine);
+  return {
+    id: Date.now()+Math.random(),
+    name: p[0], address: p[1]||'', prefDay: p[2]||'', prefTime: p[3]||'',
+    teacherReq: '', flexibility: statedFlex ? '' : defFlex, notes: p[4]||''
+  };
+}
+
+// Live preview under the Enter Multiple box: shows how each line will be read,
+// flags lines that can't be imported, before anything is added to the queue.
+function batchUpdatePreview(){
+  const el = document.getElementById('batch_pastePreview');
+  if(!el) return;
+  const text = (document.getElementById('batch_pasteText')?.value || '').trim();
+  if(!text){ el.innerHTML=''; return; }
+  const rows = text.split('\n').filter(l=>l.trim()).map(line=>{
+    const p = line.split(',').map(x=>x.trim());
+    if(p.length<2 || !p[0] || !p[1]){
+      return `<div style="display:flex;gap:8px;align-items:baseline;padding:5px 8px;border-left:3px solid #9B2C2C;background:rgba(155,44,44,0.06);border-radius:0 6px 6px 0;margin-bottom:4px">
+        <span style="font-size:11px;color:#9B2C2C;font-weight:600;flex-shrink:0">⚠ Can't read</span>
+        <span style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${line.replace(/</g,'&lt;')} — needs at least Name, Address</span>
+      </div>`;
+    }
+    const stu = batchLineToStudent(p, line);
+    const R = resolveStudent(stu);
+    const tch = R.teacherReq ? (getTeacher(R.teacherReq)?' · wants '+fullName(getTeacher(R.teacherReq)):'') : '';
+    return `<div style="display:flex;gap:8px;align-items:baseline;padding:5px 8px;border-left:3px solid var(--teal);background:var(--cream);border-radius:0 6px 6px 0;margin-bottom:4px;flex-wrap:wrap">
+      <span style="font-size:12px;font-weight:500;color:var(--navy);flex-shrink:0">${stu.name}</span>
+      <span style="font-size:11px;color:var(--muted)">${prefDesc(R)}${tch}</span>
+      ${flexBadge(R.flexibility)}
+    </div>`;
+  });
+  el.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:5px">How this will be read:</div>` + rows.join('');
+}
+
 function batchParsePaste(){
   const text = document.getElementById('batch_pasteText').value.trim();
   if(!text) return;
-  let added = 0;
+  let added = 0, skipped = 0;
   text.split('\n').filter(l=>l.trim()).forEach(line=>{
     const p = line.split(',').map(x=>x.trim());
-    if(p.length<2 || !p[0]) return;
-    batchState.students.push({
-      id: Date.now()+Math.random(),
-      name: p[0], address: p[1]||'', prefDay: p[2]||'', prefTime: p[3]||'',
-      teacherReq: '', flexibility: '', notes: p[4]||''
-    });
+    if(p.length<2 || !p[0] || !p[1]){ skipped++; return; }
+    batchState.students.push(batchLineToStudent(p, line));
     added++;
   });
   document.getElementById('batch_pasteText').value='';
+  batchUpdatePreview();
   renderBatchQueue();
-  if(added) alert(`${added} student${added!==1?'s':''} added to the queue.`);
+  if(added || skipped) alert(`${added} added to the queue.${skipped?` ${skipped} line${skipped!==1?'s':''} skipped (need at least Name, Address).`:''}`);
 }
 
 function batchHandleDrop(e){
@@ -2009,12 +2054,8 @@ function batchParseCSV(file){
     let added = 0;
     lines.slice(start).forEach(line=>{
       const p = line.split(',').map(x=>x.trim().replace(/^"|"$/g,''));
-      if(p.length<2 || !p[0]) return;
-      batchState.students.push({
-        id: Date.now()+Math.random(),
-        name: p[0], address: p[1]||'', prefDay: p[2]||'', prefTime: p[3]||'',
-        teacherReq: '', flexibility: '', notes: p[4]||''
-      });
+      if(p.length<2 || !p[0] || !p[1]) return;
+      batchState.students.push(batchLineToStudent(p, line));
       added++;
     });
     renderBatchQueue();
@@ -2033,6 +2074,7 @@ function batchDownloadTemplate(){
 
 function batchRemoveStudent(id){
   batchState.students = batchState.students.filter(s=>s.id!==id);
+  batchEditIdx = null; // indices shift after removal
   renderBatchQueue();
 }
 function batchClearAll(){
@@ -2040,8 +2082,32 @@ function batchClearAll(){
   batchState.students = [];
   batchState.proposals = [];
   batchState.unplaceable = [];
+  batchEditIdx = null;
   renderBatchQueue();
   renderBatchResults();
+}
+
+let batchEditIdx = null; // index of the queue card being edited
+
+function batchEditStudent(i){ batchEditIdx = i; renderBatchQueue(); }
+function batchEditCancel(){ batchEditIdx = null; renderBatchQueue(); }
+
+function batchEditSave(i){
+  const s = batchState.students[i];
+  if(!s) { batchEditIdx = null; renderBatchQueue(); return; }
+  const name = document.getElementById('bq_name_'+i).value.trim();
+  const addr = document.getElementById('bq_addr_'+i).value.trim();
+  if(!name || !addr){ alert('Name and address are required.'); return; }
+  s.name = name;
+  s.address = addr;
+  s.prefDay = document.getElementById('bq_pref_'+i).value.trim(); // free text — same parser as paste
+  s.prefTime = '';
+  s.exact = '';
+  s.flexibility = document.getElementById('bq_flex_'+i).value;
+  s.teacherReq = document.getElementById('bq_teacher_'+i).value;
+  s.notes = document.getElementById('bq_notes_'+i).value.trim();
+  batchEditIdx = null;
+  renderBatchQueue();
 }
 
 function renderBatchQueue(){
@@ -2049,9 +2115,30 @@ function renderBatchQueue(){
   if(countEl) countEl.textContent = batchState.students.length;
   const el = document.getElementById('batch_queueList');
   if(!el) return;
-  if(!batchState.students.length){ el.innerHTML = '<div class="empty" style="padding:1rem">No students queued yet.</div>'; return; }
-  el.innerHTML = batchState.students.map(s=>{
+  if(!batchState.students.length){ el.innerHTML = '<div class="empty" style="padding:1rem">No students queued yet.</div>'; batchEditIdx = null; return; }
+  el.innerHTML = batchState.students.map((s,i)=>{
     const R = resolveStudent(s);
+    if(batchEditIdx === i){
+      const prefText = [s.prefDay, s.prefTime, s.exact].filter(Boolean).join(' ').trim();
+      const provOpts = '<option value="">Any provider</option>' + activeTeachers().map(t=>`<option value="${t.id}"${String(t.id)===String(s.teacherReq)?' selected':''}>${fullName(t)}</option>`).join('');
+      const flexOpts = [['','—'],['flexible','Flexible'],['somewhat','Somewhat'],['fixed','Not Flexible']].map(([v,l])=>`<option value="${v}"${s.flexibility===v?' selected':''}>${l}</option>`).join('');
+      return `<div style="padding:10px;border:1px solid var(--teal);border-radius:8px;background:var(--cream);margin-bottom:6px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+          <input class="form-input" id="bq_name_${i}" value="${(s.name||'').replace(/"/g,'&quot;')}" placeholder="Name" style="font-size:12px;padding:5px 8px" />
+          <input class="form-input" id="bq_addr_${i}" value="${(s.address||'').replace(/"/g,'&quot;')}" placeholder="Address" style="font-size:12px;padding:5px 8px" />
+        </div>
+        <input class="form-input" id="bq_pref_${i}" value="${prefText.replace(/"/g,'&quot;')}" placeholder="Day &amp; time — e.g. Tue 4pm, Mon or Wed after school" style="font-size:12px;padding:5px 8px;width:100%;margin-bottom:6px" />
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+          <select class="form-select" id="bq_flex_${i}" style="font-size:12px;padding:4px 8px;width:auto">${flexOpts}</select>
+          <select class="form-select" id="bq_teacher_${i}" style="font-size:12px;padding:4px 8px;width:auto">${provOpts}</select>
+          <input class="form-input" id="bq_notes_${i}" value="${(s.notes||'').replace(/"/g,'&quot;')}" placeholder="Notes" style="font-size:12px;padding:5px 8px;flex:1;min-width:120px" />
+        </div>
+        <div style="display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="batchEditCancel()">Cancel</button>
+          <button class="btn btn-teal btn-sm" onclick="batchEditSave(${i})">Save</button>
+        </div>
+      </div>`;
+    }
     const tch = R.teacherReq ? (getTeacher(R.teacherReq)?' · wants '+fullName(getTeacher(R.teacherReq)):'') : '';
     return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="min-width:0">
@@ -2059,7 +2146,10 @@ function renderBatchQueue(){
         <div style="font-size:12px;color:var(--muted)">${s.address}</div>
         <div style="font-size:11px;color:var(--muted)">${prefDesc(R)}${tch}${R.notes?' · 📝 '+R.notes:''}</div>
       </div>
-      <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="batchRemoveStudent(${s.id})">✕</button>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        <button class="btn btn-ghost btn-sm" onclick="batchEditStudent(${i})">✎ Edit</button>
+        <button class="btn btn-ghost btn-sm" onclick="batchRemoveStudent(${s.id})">✕</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -2105,7 +2195,7 @@ function parseDaysFromText(text){
 function parseFlexFromText(text){
   const t = (text||'').toLowerCase();
   if(/not\s*flexible|isn'?t\s*flexible|no\s*flexib|not\s*flex\b|inflexible/.test(t)) return 'fixed';
-  if(/somewhat\s*flexible|kind\s*of\s*flexible|a\s*little\s*flexible|some\s*flexib/.test(t)) return 'somewhat';
+  if(/somewhat\s*flexible|kind\s*of\s*flexible|a\s*little\s*flexible|some\s*flexib|somewhat\b/.test(t)) return 'somewhat';
   if(/flexible|flex\b/.test(t)) return 'flexible';
   return '';
 }
