@@ -43,9 +43,11 @@ module.exports = async (req, res) => {
     const alreadyExists = existingProfile ? { id: existingProfile.id } : null;
 
     let userId;
+    let inviteSent = false;
 
     if (alreadyExists) {
-      // Already has an account — just update their profile and re-send invite
+      // Existing account — just renew their access. No email; if they need in, they use
+      // "Forgot password" on the login page.
       userId = alreadyExists.id;
       await supabase.from('profiles').upsert({
         id: userId,
@@ -57,20 +59,21 @@ module.exports = async (req, res) => {
         access_granted_at: new Date().toISOString()
       });
     } else {
-      // ── 2. Create new Supabase user ──
-      const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
-        email,
-        email_confirm: true,  // skip email confirmation — GHL handles the welcome email
-        user_metadata: {
+      // ── 2. New user: invite them. inviteUserByEmail BOTH creates the account AND
+      //    sends the setup email through your custom SMTP (SendGrid), so it appears
+      //    from you with a one-time link to set a password and log in.
+      const { data: invited, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
+        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/`,
+        data: {
           full_name: name || '',
           ghl_contact_id: contact_id || ''
         }
       });
 
-      if (createError) {
-        // Rare edge: auth user exists but has no profile row (e.g. pre-profiles account).
-        // Fall back to a paginated scan of auth users to recover their id.
-        if (/already|registered|exists/i.test(createError.message)) {
+      if (inviteError) {
+        // Rare edge: an auth user already exists without a profile row. Recover the id
+        // via a paginated scan and treat as existing (no invite email needed).
+        if (/already|registered|exists/i.test(inviteError.message)) {
           let found = null, page = 1;
           while (!found) {
             const { data: pageData, error: pageErr } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
@@ -80,16 +83,17 @@ module.exports = async (req, res) => {
             page++;
           }
           if (!found) {
-            console.error('Create user error (and fallback scan failed):', createError.message);
-            return res.status(500).json({ error: createError.message });
+            console.error('Invite error (and fallback scan failed):', inviteError.message);
+            return res.status(500).json({ error: inviteError.message });
           }
           userId = found.id;
         } else {
-          console.error('Create user error:', createError.message);
-          return res.status(500).json({ error: createError.message });
+          console.error('Invite error:', inviteError.message);
+          return res.status(500).json({ error: inviteError.message });
         }
       } else {
-        userId = newUser.user.id;
+        userId = invited.user.id;
+        inviteSent = true;
       }
 
       // ── 3. Save profile ──
@@ -104,36 +108,18 @@ module.exports = async (req, res) => {
       });
     }
 
-    // ── 4. Generate password setup link ──
-    // This is the link you put in your GHL email template as {{custom_value.setup_link}}
-    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-      type: 'recovery',   // 'recovery' type works for first-time password setup too
-      email,
-      options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/`
-      }
-    });
-
-    if (linkError) {
-      console.error('Link generation error:', linkError.message);
-      return res.status(500).json({ error: linkError.message });
-    }
-
-    const setupLink = linkData.properties.action_link;
-
-    // ── 5. Push setup link + tag back to GHL via API ──
+    // ── 4. Tag the contact in GHL (pipeline/tags only — no link needed anymore) ──
     if (contact_id && process.env.GHL_API_KEY) {
-      await updateGHLContact(contact_id, setupLink);
+      await tagGHLContact(contact_id, business_type);
     }
 
-    // ── 6. Return success + setup link ──
-    // GHL can use this in the webhook response or you can trigger a GHL email action
+    // ── 5. Done ──
     return res.json({
       success: true,
       userId,
       email,
-      setupLink,  // put this in your GHL email: {{custom_value.setup_link}}
-      message: alreadyExists ? 'Existing user — access renewed' : 'New user created'
+      inviteSent,
+      message: alreadyExists ? 'Existing user — access renewed (no email sent)' : 'New user invited'
     });
 
   } catch (err) {
@@ -142,36 +128,26 @@ module.exports = async (req, res) => {
   }
 };
 
-// ── Update GHL contact with setup link and tag ──────────────────────────────
-async function updateGHLContact(contactId, setupLink) {
+// ── Tag the GHL contact (pipeline/tags only) ────────────────────────────────
+async function tagGHLContact(contactId, business_type) {
   try {
     const headers = {
       'Authorization': `Bearer ${process.env.GHL_API_KEY}`,
       'Content-Type': 'application/json',
       'Version': '2021-07-28'
     };
-
-    // Add custom field with the setup link so GHL email can use it
     await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({
-        customFields: [
-          {
-            id: process.env.GHL_SETUP_LINK_FIELD_ID || 'schedule_helper_setup_link',
-            value: setupLink
-          }
-        ],
         tags: [
           'schedule-helper-purchased',
-          'schedule-helper-pending-setup',
           business_type ? `schedule-helper-mode-${business_type}` : null
         ].filter(Boolean)
       })
     });
-
   } catch (err) {
     // Non-fatal — log but don't fail the webhook
-    console.error('GHL update error:', err.message);
+    console.error('GHL tag error:', err.message);
   }
 }
