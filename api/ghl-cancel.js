@@ -35,7 +35,7 @@ module.exports = async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const { email, contact_id, access_until } = req.body;
+  const { email, contact_id, access_until, billing_day } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
 
   try {
@@ -53,13 +53,22 @@ module.exports = async (req, res) => {
     }
     const user = { id: profileRow.id, email: profileRow.email };
 
-    // Parse the paid-through date, if GHL sent one
+    // Determine the paid-through date.
+    // Preferred input: billing_day (1–31) — the day of the month they normally bill.
+    // We resolve it to the NEXT occurrence of that day from today, so access ends on
+    // their next billing date (honoring time already paid). An explicit access_until
+    // date is still supported as a fallback if one is ever sent.
+    const now = new Date();
     let untilDate = null;
-    if (access_until) {
+
+    const dayNum = parseInt(billing_day, 10);
+    if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
+      untilDate = nextBillingDate(now, dayNum);
+    } else if (access_until) {
       const d = new Date(access_until);
       if (!isNaN(d.getTime())) untilDate = d;
     }
-    const now = new Date();
+
     const hasFutureAccess = untilDate && untilDate > now;
 
     if (hasFutureAccess) {
@@ -112,3 +121,33 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 };
+
+// Given "today" and a billing day-of-month (1–31), return the NEXT date on which
+// that day occurs (today counts as already-passed, so it rolls to next month).
+// Handles short months: e.g. billing day 31 in a 30-day month → the 30th; Feb → 28/29.
+// Computed entirely in UTC to avoid timezone drift in the comparison.
+function nextBillingDate(today, day) {
+  const y = today.getUTCFullYear();
+  const m = today.getUTCMonth(); // 0-based
+
+  const clampToMonth = (year, month, d) => {
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate(); // last day of that month
+    const useDay = Math.min(d, lastDay);
+    // End of that day (UTC) so access lasts through the whole billing day.
+    return new Date(Date.UTC(year, month, useDay, 23, 59, 59, 999));
+  };
+
+  // Candidate in the current month
+  let candidate = clampToMonth(y, m, day);
+  // If that day is today or already passed, roll to next month. Comparing by date
+  // (not time) so that cancelling ON the billing day rolls forward a full cycle
+  // rather than ending access the same day.
+  const todayDateOnly = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const candDateOnly = Date.UTC(candidate.getUTCFullYear(), candidate.getUTCMonth(), candidate.getUTCDate());
+  if (candDateOnly <= todayDateOnly) {
+    const nm = m + 1;
+    const ny = y + Math.floor(nm / 12);
+    candidate = clampToMonth(ny, nm % 12, day);
+  }
+  return candidate;
+}
