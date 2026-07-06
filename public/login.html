@@ -173,7 +173,13 @@ body {
 // ── Config — swap these with your actual values ──
 const SUPABASE_URL = 'https://kuspirqiqbrmfnktrsji.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1c3BpcnFpcWJybWZua3Ryc2ppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMTU3NzUsImV4cCI6MjA5NzY5MTc3NX0.k9WiBNwBSKjn1pMlwmYtvJNfGN_q1YeorI2tOnJuB3o';
-const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    detectSessionInUrl: true,    // let Supabase auto-handle email link tokens (invite + reset)
+    persistSession: true,
+    autoRefreshToken: true
+  }
+});
 
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -191,38 +197,54 @@ function showError(id, msg) {
   if (el) { el.textContent = msg; el.style.display = 'block'; }
 }
 
+// ── Detect invite/recovery links via Supabase auth events ──
+// detectSessionInUrl handles the token (hash or ?code); this event tells us the link
+// was a password setup/recovery so we show the create-password screen.
+let recoveryHandled = false;
+function handleRecoveryEvent(event) {
+  if ((event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') && isLinkEntry() && !recoveryHandled) {
+    recoveryHandled = true;
+    showScreen('screen-setpassword');
+    setTimeout(() => { try { history.replaceState({}, '', '/'); } catch(e){} }, 500);
+  }
+}
+sbClient.auth.onAuthStateChange((event) => handleRecoveryEvent(event));
+
+// True when the page was opened from an email link (token/code present in the URL).
+function isLinkEntry() {
+  const h = new URLSearchParams((window.location.hash || '').replace('#',''));
+  const q = new URLSearchParams(window.location.search);
+  return !!(h.get('access_token') || h.get('type') === 'recovery' || q.get('code') || q.get('type') === 'recovery');
+}
+
 // ── Init — runs on page load ──
 (async function init() {
-  const hash = window.location.hash;
-  const hashParams = new URLSearchParams(hash.replace('#',''));
-  const accessToken = hashParams.get('access_token');
-  const refreshToken = hashParams.get('refresh_token');
-  const errorCode = hashParams.get('error_code');
+  const hashParams = new URLSearchParams((window.location.hash || '').replace('#',''));
+  const urlParams = new URLSearchParams(window.location.search);
+  const errorCode = hashParams.get('error_code') || urlParams.get('error_code') || urlParams.get('error');
 
-  // If there's an error in the URL (expired link etc) just show sign in
+  // Expired/invalid link → sign in with a helpful message
   if (errorCode) {
+    showError('signin-error', 'That link has expired or was already used. Use “Forgot password” below to get a fresh one.');
     showScreen('screen-signin');
     return;
   }
 
-  // If there's a token in the URL it's an invite or reset link
-  if (accessToken) {
-    try {
-      await sbClient.auth.setSession({ access_token: accessToken, refresh_token: refreshToken || '' });
-    } catch(e) { console.log('session set error', e); }
+  // Opened from an invite/reset link → show create-password screen.
+  // detectSessionInUrl establishes the session in the background; the auth event
+  // above also fires, and both point to the same set-password screen.
+  if (isLinkEntry()) {
     showScreen('screen-setpassword');
     return;
   }
 
-  // Check for logout param
-  const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('signout') === 'true') {
     await sbClient.auth.signOut();
     showScreen('screen-signin');
     return;
   }
 
-  // Check if already logged in
+  // Already logged in?
   const { data: { session } } = await sbClient.auth.getSession();
   if (session) await redirectIfSubscribed(session.user);
 })();
@@ -283,14 +305,8 @@ async function setNewPassword() {
   const { error } = await sbClient.auth.updateUser({ password });
   if (error) { showError('setpw-error', error.message); return; }
 
-  // New user from invite → go to billing
-  // Existing user reset → go to app
-  const hash = window.location.hash;
-  if (hash.includes('type=invite')) {
-    showScreen('screen-billing');
-  } else {
-    window.location.href = '/app';
-  }
+  // Password set — session is active, go straight into the app.
+  window.location.href = '/app';
 }
 
 // Allow Enter key on inputs
