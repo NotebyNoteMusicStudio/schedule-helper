@@ -4947,21 +4947,27 @@ function hideLoading() {
   await resolveAccess();
 
   // ── Periodic access check (force-stop when access truly ends) ──
-  // Uses the subscription-status API, which honors the grace period (access_until):
-  // a cancelled user keeps access until their paid period ends, then is signed out.
+  // Uses the subscription-status API, which honors the grace period (access_until).
+  // Only redirects to the cancelled message when the account is TRULY cancelled/ended —
+  // never for an ordinary session expiry (inactivity), which must not be mislabeled.
   async function checkSubscriptionActive() {
     try {
       const { data: { session: s } } = await sb.auth.getSession();
-      if (!s) { window.location.href = '/'; return; }
+      if (!s) return; // no session = ordinary logout/inactivity; let normal flow handle it
       const resp = await fetch('/api/subscription-status', {
         headers: { 'Authorization': 'Bearer ' + s.access_token }
       });
       if (!resp.ok) return; // network/API hiccup — try again next interval
       const data = await resp.json();
-      if (!data.active) {
+      // Access has genuinely ended only when the account is cancelled/inactive.
+      const trulyCancelled = !data.active &&
+        (data.status === 'inactive' || data.status === 'cancelling' || data.status === 'cancelled');
+      if (trulyCancelled) {
         await sb.auth.signOut();
         window.location.href = '/?cancelled=1';
       }
+      // Any other non-active reason (unreadable status, transient state): do nothing,
+      // so a normal inactivity logout never shows the cancellation message.
     } catch(e) { /* non-fatal — try again next interval */ }
   }
   setInterval(checkSubscriptionActive, 5 * 60 * 1000); // every 5 minutes
