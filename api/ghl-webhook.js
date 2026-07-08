@@ -73,6 +73,8 @@ module.exports = async (req, res) => {
         redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/`,
         data: {
           full_name: name || '',
+          phone: phone || '',
+          business_type: business_type || '',
           ghl_contact_id: contact_id || ''
         }
       });
