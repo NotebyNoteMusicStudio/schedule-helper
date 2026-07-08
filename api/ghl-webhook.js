@@ -31,6 +31,12 @@ module.exports = async (req, res) => {
   const { email, name, contact_id, business_type, phone } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
 
+  // Diagnostic: log exactly what GHL sent so we can see missing/renamed fields in Vercel logs.
+  console.log('ghl-webhook received:', JSON.stringify({
+    email, name, contact_id, business_type, phone,
+    _allKeys: Object.keys(req.body || {})
+  }));
+
   try {
     // ── 1. Check if user already exists ──
     // Indexed lookup on profiles — listUsers() is paginated at 50 and misses users at scale,
