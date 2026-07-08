@@ -28,7 +28,7 @@ module.exports = async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const { email, name, contact_id, business_type } = req.body;
+  const { email, name, contact_id, business_type, phone } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
 
   try {
@@ -53,6 +53,7 @@ module.exports = async (req, res) => {
         id: userId,
         email,
         full_name: name || '',
+        phone: phone || null,
         ghl_contact_id: contact_id || '',
         subscription_status: 'active',
         business_type: business_type || null,
@@ -101,6 +102,7 @@ module.exports = async (req, res) => {
         id: userId,
         email,
         full_name: name || '',
+        phone: phone || null,
         ghl_contact_id: contact_id || '',
         subscription_status: 'active',
         business_type: business_type || null,
